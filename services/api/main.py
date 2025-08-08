@@ -11,14 +11,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import uvicorn
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional, cast
 from uuid import uuid4
 import logging
 
 # Import database components
 from .database import get_db, create_tables
 from .db_models import ScrapingTask, ParserCache
-from .models import ScrapeRequest, TaskResponse, TaskStatus
+from .models import ScrapeRequest, TaskResponse, TaskStatus, TaskStatusResponse
 from . import db_utils
 from shared.celery_app import celery_app
 
@@ -196,6 +196,65 @@ async def process_request(
         task_id=task_id,
         status=TaskStatus.PENDING,
         message="Task created successfully",
+    )
+
+
+@app.get(
+    "/api/v1/status/{task_id}",
+    response_model=TaskStatusResponse,
+    tags=["API v1"],
+    summary="Get task status",
+    description=(
+        "Check the current status of a previously created task. Returns one of "
+        "PENDING, IN_PROGRESS, SUCCESS, or FAILED."
+    ),
+)
+async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskStatusResponse:
+    """
+    Retrieve the current status for a scraping task by its task_id.
+
+    If the task is not found, a 404 error is returned. Timestamps are
+    provided based on available fields; when missing, sensible defaults
+    are applied.
+    """
+    try:
+        task = db_utils.get_scraping_task(db, task_id)
+    except Exception as e:
+        logger.error(f"Failed to query task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to query task status")
+
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Map DB status string to API enum
+    try:
+        status_enum = TaskStatus(task.status)
+    except ValueError:
+        status_enum = TaskStatus.FAILED
+
+    # Extract concrete values from ORM attributes (avoid Column[T] typing)
+    task_id_value: str = cast(str, getattr(task, "task_id", ""))
+    created_at: datetime = cast(
+        datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
+    )
+    # Prefer completed_at, then started_at, else created_at
+    updated_at: datetime = cast(
+        datetime,
+        getattr(task, "completed_at", None)
+        or getattr(task, "started_at", None)
+        or created_at,
+    )
+
+    # Avoid direct truthiness checks on SQLAlchemy columns for type checkers
+    err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
+
+    return TaskStatusResponse(
+        task_id=task_id_value,
+        status=status_enum,
+        progress=None,
+        message=err_msg,
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
