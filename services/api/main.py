@@ -5,7 +5,7 @@ This module initializes the FastAPI application and defines the core API endpoin
 for processing web scraping requests using natural language prompts.
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -34,6 +34,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
+tags_metadata = [
+    {
+        "name": "Root",
+        "description": "Basic information and navigation for the API.",
+    },
+    {
+        "name": "Health",
+        "description": "Liveness and readiness probes, including DB connectivity checks.",
+    },
+    {
+        "name": "API v1",
+        "description": "Primary public API for creating scraping tasks, tracking status, and retrieving results.",
+    },
+    {
+        "name": "Testing",
+        "description": "Non-production helpers used during development and CI.",
+    },
+]
+
 app = FastAPI(
     title="Intelligent Web Data Aggregator",
     description="""
@@ -58,6 +77,7 @@ app = FastAPI(
         "name": "MIT",
         "url": "https://opensource.org/licenses/MIT",
     },
+    openapi_tags=tags_metadata,
 )
 
 # Add CORS middleware
@@ -163,6 +183,34 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
         "Accepts a URL and a natural language prompt, creates a background scraping "
         "task (initially PENDING), and returns its task_id for status polling."
     ),
+    responses={
+        202: {
+            "description": "Task accepted and created",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "task_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "status": "PENDING",
+                        "message": "Task created successfully",
+                        "created_at": "2025-08-08T12:00:00Z"
+                    }
+                }
+            },
+        },
+        400: {
+            "model": ErrorResponse,
+            "description": "Validation error in the request body",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Bad Request",
+                        "message": "Invalid URL format",
+                        "timestamp": "2025-08-08T12:00:00Z"
+                    }
+                }
+            },
+        },
+    },
 )
 async def process_request(
     request: ScrapeRequest,
@@ -215,6 +263,36 @@ async def process_request(
         "Check the current status of a previously created task. Returns one of "
         "PENDING, IN_PROGRESS, SUCCESS, or FAILED."
     ),
+    responses={
+        200: {
+            "description": "Current task status",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "task_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "status": "IN_PROGRESS",
+                        "progress": 40,
+                        "message": None,
+                        "created_at": "2025-08-08T12:00:00Z",
+                        "updated_at": "2025-08-08T12:00:20Z"
+                    }
+                }
+            },
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "Task not found",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Not Found",
+                        "message": "Task not found",
+                        "timestamp": "2025-08-08T12:00:00Z"
+                    }
+                }
+            },
+        },
+    },
 )
 async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskStatusResponse:
     """
@@ -274,9 +352,68 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskSt
         "Retrieve the final extracted data for a task once it has completed successfully."
     ),
     responses={
-        202: {"model": TaskStatusResponse, "description": "Task not completed yet"},
-        400: {"model": ErrorResponse, "description": "Task failed"},
-        404: {"model": ErrorResponse, "description": "Task not found"},
+        200: {
+            "description": "Successful scraping result",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "task_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "status": "SUCCESS",
+                        "url": "https://example-jobs.com",
+                        "prompt": "I want all the job listings with their titles and locations",
+                        "data": [
+                            {"text": "Senior Software Engineer — Berlin", "source": "//div[@class='job-card']/h2", "confidence": 0.92}
+                        ],
+                        "metadata": {"total_matches": 1, "used_cached_parser": False},
+                        "processing_time": 3.21,
+                        "created_at": "2025-08-08T12:00:00Z",
+                        "completed_at": "2025-08-08T12:00:03Z"
+                    }
+                }
+            },
+        },
+        202: {
+            "model": TaskStatusResponse,
+            "description": "Task not completed yet",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "task_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "status": "IN_PROGRESS",
+                        "progress": 75,
+                        "message": None,
+                        "created_at": "2025-08-08T12:00:00Z",
+                        "updated_at": "2025-08-08T12:00:10Z"
+                    }
+                }
+            },
+        },
+        400: {
+            "model": ErrorResponse,
+            "description": "Task failed",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Bad Request",
+                        "message": "Task failed: regex did not match",
+                        "timestamp": "2025-08-08T12:00:10Z"
+                    }
+                }
+            },
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "Task not found",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Not Found",
+                        "message": "Task not found",
+                        "timestamp": "2025-08-08T12:00:10Z"
+                    }
+                }
+            },
+        },
     },
 )
 async def get_task_result(task_id: str, db: Session = Depends(get_db)) -> Any:
