@@ -77,7 +77,80 @@ I see the same issue here with the Pydantic `Field` usage. The problem is that y
 ```
 
 ```
+I need to fix all the `Field` usages throughout the file. Let me update them systematically. First, let me also update the Config class to use the new Pydantic v2 syntax: 
+```
 
+```
+Now let me fix the TaskResponse model: 
+```
+
+```
+Now let me fix the TaskStatusResponse model: 
+```
+
+```
+Now let me fix the ExtractedData model: 
+```
+
+```
+Now let me fix the ScrapeResult model: 
+```
+
+```
+Now let me fix the ErrorResponse model: 
+```
+
+```
+Now let me check if there are any remaining errors: Perfect! All the Pydantic Field errors have been resolved. Here's what I fixed:
+
+## **Problem Explained**
+
+The same issue occurred here as in the config file - you were using the old Pydantic v1 syntax with the ellipsis (`...`) as a positional argument in `Field()`. In Pydantic v2, this syntax is no longer supported.
+
+## **Key Changes Made**
+
+### **1. Removed Ellipsis (`...`) Arguments**
+```python
+# Before (Pydantic v1 - causing errors)
+url: HttpUrl = Field(
+    ...,
+    description="The URL to scrape data from",
+    example="https://example-jobs.com"
+)
+
+# After (Pydantic v2 - working correctly)
+url: HttpUrl = Field(
+    description="The URL to scrape data from",
+    examples=["https://example-jobs.com"]
+)
+```
+
+### **2. Updated Example Syntax**
+- Changed `example="value"` to `examples=["value"]` (Pydantic v2 prefers `examples` as a list)
+
+### **3. Modernized Config Class**
+```python
+# Before (Pydantic v1)
+class Config:
+    json_schema_extra = {...}
+
+# After (Pydantic v2)
+model_config = {
+    "json_schema_extra": {...}
+}
+```
+
+### **4. Required Fields Handling**
+In Pydantic v2, fields without default values are automatically required. You don't need to specify `...` explicitly.
+
+## **Why These Changes?**
+
+- **Pydantic v2 Compatibility**: The new syntax is cleaner and more explicit
+- **Better Type Safety**: Removes ambiguous positional arguments
+- **Modern Best Practices**: Follows current Pydantic conventions
+- **Enhanced Documentation**: `examples` provides better OpenAPI schema generation
+
+Your models are now fully compatible with Pydantic v2 and will work seamlessly with FastAPI's automatic API documentation and validation! The Field definitions will properly generate OpenAPI schemas with examples for your API documentation.
 
 ---
 

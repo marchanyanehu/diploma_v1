@@ -105,7 +105,7 @@ curl "http://localhost:8000/api/v1/result/{task_id}"
 diploma/
 ├── services/
 │   ├── api/                 # FastAPI application
-│   └── playwright-worker/   # Celery worker with Playwright
+│   └── playwright_worker/   # Celery worker tasks package (import path)
 ├── shared/                  # Shared models and utilities
 ├── tests/                   # Test suites
 ├── migrations/              # Alembic database migrations

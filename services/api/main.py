@@ -20,6 +20,7 @@ from .database import get_db, create_tables
 from .db_models import ScrapingTask, ParserCache
 from .models import ScrapeRequest, TaskResponse, TaskStatus
 from . import db_utils
+from shared.celery_app import celery_app
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -178,6 +179,18 @@ async def process_request(
         )
     except Exception as e:
         logger.warning(f"DB unavailable or failed to persist task {task_id}: {e}")
+
+    # Enqueue background processing via Celery (non-blocking)
+    try:
+        celery_app.send_task(
+            "scrape.process_request",
+            args=[task_id, str(request.url), request.prompt],
+            queue="default",
+        )
+        logger.info(f"Enqueued Celery task for {task_id}")
+    except Exception as e:
+        # If queuing fails, we still return PENDING so client can retry later
+        logger.error(f"Failed to enqueue Celery task for {task_id}: {e}")
 
     return TaskResponse(
         task_id=task_id,

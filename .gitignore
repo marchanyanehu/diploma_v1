@@ -192,6 +192,7 @@ logs/
 .env.development
 .env.test
 .env.production
+.specstory/
 
 # Database
 *.db

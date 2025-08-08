@@ -148,7 +148,9 @@ i have intalled the gh via choco now create all the issues and milestones, assig
 
 _**Assistant**_
 
+Excellent! Now that you have GitHub CLI installed, let me create a comprehensive set of issues and milestones for your diploma project. I'll structure this based on your project's architecture and the typical development workflow.
 
+First, let me authenticate and check if we're in the right repository: 
 
 ---
 

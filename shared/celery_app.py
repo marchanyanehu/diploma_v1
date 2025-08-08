@@ -1,0 +1,54 @@
+"""
+Shared Celery application factory and instance.
+
+This module centralizes Celery configuration so both the API and the
+worker import the same app. It reads configuration from environment
+variables with sensible defaults.
+"""
+
+from __future__ import annotations
+
+import os
+from celery import Celery
+
+
+def _get_broker_backend() -> tuple[str, str]:
+    """Resolve broker and backend URLs from environment variables.
+
+    Priority:
+    - CELERY_BROKER_URL / CELERY_RESULT_BACKEND
+    - REDIS_URL (used for both broker and backend)
+    - Fallback to redis://localhost:6379/0
+    """
+    default = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    broker = os.getenv("CELERY_BROKER_URL", default)
+    backend = os.getenv("CELERY_RESULT_BACKEND", default)
+    return broker, backend
+
+
+def _make_celery() -> Celery:
+    broker, backend = _get_broker_backend()
+    app = Celery(
+        "aggregator",
+        broker=broker,
+        backend=backend,
+        include=[
+            # Ensure tasks module is auto-registered when worker starts
+            "services.playwright_worker.tasks",
+        ],
+    )
+    app.conf.update(
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
+        timezone="UTC",
+        enable_utc=True,
+        task_track_started=True,
+        task_time_limit=60 * 15,  # 15 minutes hard limit
+        task_soft_time_limit=60 * 10,  # 10 minutes soft limit
+    )
+    return app
+
+
+# Global Celery instance to be imported by API and worker
+celery_app: Celery = _make_celery()

@@ -21,7 +21,6 @@ services/api/
 ├── config.py            # Configuration settings
 ├── requirements.txt     # Python dependencies
 ├── Dockerfile          # Container configuration
-├── run_dev.py          # Development runner
 ├── models/             # Pydantic models
 │   └── __init__.py     # Request/response models
 └── tests/              # Test suite
@@ -49,13 +48,10 @@ services/api/
 
 3. **Run the Application**:
    ```bash
-   # Option 1: Using the development runner
-   python run_dev.py
-   
-   # Option 2: Using uvicorn directly
+   # Run with uvicorn directly
    uvicorn main:app --reload --host localhost --port 8000
    
-   # Option 3: Using the main module
+   # Or using the main module
    python main.py
    ```
 
@@ -85,11 +81,14 @@ services/api/
 - `GET /health` - Health check endpoint
 - `GET /api/v1/health` - API v1 health check
 
-### Future Endpoints (Tasks #201-207)
+### Future/Async Endpoints (Tasks #201-207)
 
 - `POST /api/v1/process` - Process scraping request
 - `GET /api/v1/status/{task_id}` - Check task status
 - `GET /api/v1/result/{task_id}` - Get task results
+
+The API enqueues long-running scraping work to Celery (Redis broker). See
+`shared/celery_app.py` and `services/playwright_worker/tasks.py`.
 
 ## Configuration
 
