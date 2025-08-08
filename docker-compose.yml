@@ -6,9 +6,9 @@ services:
     image: postgres:15-alpine
     container_name: diploma_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: diploma_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_DB: ${POSTGRES_DB:-diploma_db}
     ports:
       - "5432:5432"
     volumes:
@@ -37,23 +37,29 @@ services:
   # FastAPI development server (optional - for containerized development)
   api:
     build:
-      context: ./services/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/api/Dockerfile
     container_name: diploma_api
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/diploma_db
-      - REDIS_URL=redis://redis:6379/0
-      - DEBUG=true
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-diploma_db}
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - DEBUG=${DEBUG:-true}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - ./services/api:/app
-    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      - ./:/app
+    command: ["python", "-m", "uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
   postgres_data:
