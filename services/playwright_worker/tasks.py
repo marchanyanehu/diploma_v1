@@ -11,6 +11,9 @@ from __future__ import annotations
 import time
 import logging
 from typing import Any, Dict
+from urllib.parse import urlparse
+
+from pydantic import HttpUrl, TypeAdapter
 
 from shared.celery_app import celery_app
 
@@ -60,3 +63,43 @@ def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="scrape.fetch_url")
+def fetch_url(url: str) -> Dict[str, Any]:
+    """Minimal Celery task that accepts a URL and returns a normalized payload.
+
+    This satisfies EPIC #3 Task #303. Later tasks (#304+) will use Playwright to
+    actually navigate and collect data. Here we just validate/normalize the URL
+    and return basic metadata so the pipeline can be wired end-to-end.
+
+    Args:
+        url: The target page URL provided by the client.
+
+    Returns:
+        A dict with the normalized URL and simple metadata.
+
+    Raises:
+        ValueError: If the provided URL is invalid.
+    """
+    logger.info("Received fetch_url task for: %s", url)
+
+    # Validate and normalize URL via Pydantic v2 TypeAdapter
+    adapter: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
+    try:
+        valid = adapter.validate_python(url)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Invalid URL provided to fetch_url: %s | error: %s", url, exc)
+        raise ValueError(f"Invalid URL: {url}") from exc
+
+    normalized_url = str(valid)
+    parts = urlparse(normalized_url)
+    host = parts.netloc
+
+    payload: Dict[str, Any] = {
+        "status": "RECEIVED",
+        "url": normalized_url,
+        "host": host,
+    }
+    logger.info("fetch_url normalized payload: %s", payload)
+    return payload
