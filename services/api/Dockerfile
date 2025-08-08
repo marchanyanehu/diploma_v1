@@ -30,9 +30,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Install runtime dependencies
+# Install runtime dependencies (libpq for psycopg2, curl for healthcheck)
 RUN apt-get update && apt-get install -y \
     libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder stage
@@ -56,9 +57,9 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (uses curl to avoid extra Python deps)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
 # Command to run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

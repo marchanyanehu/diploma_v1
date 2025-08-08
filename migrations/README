@@ -1,0 +1,4 @@
+Alembic migrations directory for the Intelligent Web Data Aggregator.
+- env.py: Alembic environment setup
+- script.py.mako: Template for new migration scripts
+- versions/: Contains individual migration scripts

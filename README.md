@@ -121,7 +121,25 @@ Run the test suite:
 pytest --cov=. --cov-report=html
 ```
 
-## 📚 Development
+## �️ Database Migrations (Alembic)
+
+Alembic is set up under the `migrations/` folder. To create and apply migrations locally:
+
+1. Ensure PostgreSQL is running (via Docker Compose or locally) and `.env` has DB settings.
+2. Run migrations:
+
+```powershell
+# From repo root
+alembic upgrade head
+```
+
+To generate a new migration after model changes:
+
+```powershell
+alembic revision --autogenerate -m "describe change"; alembic upgrade head
+```
+
+## �📚 Development
 
 This project follows modern Python development practices:
 - Type hints throughout the codebase
