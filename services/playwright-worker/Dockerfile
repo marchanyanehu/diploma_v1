@@ -11,10 +11,12 @@ WORKDIR /app
 
 # Install project requirements (reuse API requirements to keep deps in sync)
 COPY services/api/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip \
-    && pip install -r /tmp/requirements.txt \
+RUN python -m pip install --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
     # Ensure playwright python package is present (base image usually has it)
-    && pip install --no-cache-dir "playwright==1.44.0"
+    && pip install --no-cache-dir "playwright==1.44.0" \
+    # Explicitly install browsers and system dependencies for reliability
+    && python -m playwright install --with-deps chromium
 
 # Copy repository code
 COPY . /app
