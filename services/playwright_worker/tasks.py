@@ -8,9 +8,12 @@ replace the simulation with real Playwright + LLM logic.
 
 from __future__ import annotations
 
+import os
 import time
+import random
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from pydantic import HttpUrl, TypeAdapter
@@ -23,6 +26,172 @@ from services.api.database import SessionLocal
 from services.api import db_utils
 
 logger = logging.getLogger(__name__)
+
+
+def _create_context(p, *, headless: bool, user_agent: str, locale: str, timezone_id: str) -> tuple[Any, Any, Any]:
+    """Launch Chromium and create a realistic browser context and page."""
+    width = random.randint(1280, 1920)
+    height = random.randint(720, 1080)
+    browser = p.chromium.launch(headless=headless)
+    context = browser.new_context(
+        viewport={"width": width, "height": height},
+        device_scale_factor=1.0,
+        is_mobile=False,
+        has_touch=False,
+        user_agent=user_agent,
+        locale=locale,
+        timezone_id=timezone_id,
+        color_scheme="light",
+    )
+    # Extra realistic headers
+    context.set_extra_http_headers({
+        "Accept-Language": f"{locale},en;q=0.9",
+    })
+    # Stealthy init script
+    context.add_init_script(
+        """
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        window.chrome = { runtime: {} };
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(param) {
+            if (param === 37445) return 'Intel Inc.'; // UNMASKED_VENDOR_WEBGL
+            if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+            return getParameter.call(this, param);
+        };
+        """
+    )
+    page = context.new_page()
+    return browser, context, page
+
+
+def _attach_network_listener(page, network: List[Dict[str, Any]], *, max_responses: int, max_preview: int) -> None:
+    """Attach a response listener to capture XHR/Fetch responses with small previews."""
+
+    def on_response(resp, _network=network):  # type: ignore[no-redef]
+        try:
+            if len(_network) >= max_responses:
+                return
+            req = resp.request
+            rtype = getattr(req, "resource_type", lambda: None)()
+            if rtype not in ("xhr", "fetch"):
+                return
+            entry: Dict[str, Any] = {
+                "url": resp.url,
+                "method": req.method,
+                "status": resp.status,
+                "request_headers": dict(req.headers),
+                "response_headers": dict(resp.headers()),
+                "resource_type": rtype,
+            }
+            try:
+                text = resp.text()
+                if text and len(text) > max_preview:
+                    entry["body_preview"] = text[:max_preview]
+                    entry["body_truncated"] = True
+                else:
+                    entry["body_preview"] = text
+                    entry["body_truncated"] = False
+            except Exception:  # noqa: BLE001
+                entry["body_preview"] = None
+                entry["body_truncated"] = False
+            _network.append(entry)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("response capture error: %s", e)
+
+    page.on("response", on_response)
+
+
+def _navigate_and_capture(page, url: str, *, nav_timeout_ms: int, settle_delay_ms: int) -> str:
+    """Navigate with two-phase wait and return document.body.innerText."""
+    from playwright.sync_api import TimeoutError as PWTimeoutError  # type: ignore
+
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout_ms)
+        time.sleep(random.uniform(0.2, 0.6))
+        page.wait_for_load_state("networkidle", timeout=nav_timeout_ms)
+    except PWTimeoutError:
+        logger.warning("Timeout navigating to %s after %sms", url, nav_timeout_ms)
+    except Exception as nav_exc:  # noqa: BLE001
+        logger.exception("Navigation error for %s: %s", url, nav_exc)
+
+    time.sleep(max(0, settle_delay_ms) / 1000.0)
+    try:
+        return page.evaluate("document.body.innerText || ''")
+    except Exception as eval_exc:  # noqa: BLE001
+        logger.warning("Failed to evaluate innerText on %s: %s", url, eval_exc)
+        return ""
+
+
+def _browse_and_capture(url: str) -> Tuple[str, List[Dict[str, Any]], int, datetime, datetime]:
+    """Open the URL headlessly with Playwright, capture innerText and XHR/Fetch.
+
+    Returns:
+        inner_text, network_events, duration_seconds, started_at, completed_at
+    """
+    from playwright.sync_api import sync_playwright  # type: ignore
+
+    # Configurable knobs
+    headless = os.getenv("PLAYWRIGHT_HEADLESS", "true").lower() != "false"
+    nav_timeout_ms = int(os.getenv("PLAYWRIGHT_NAV_TIMEOUT_MS", "30000"))
+    settle_delay_ms = int(os.getenv("PLAYWRIGHT_SETTLE_DELAY_MS", "500"))
+    max_retries = int(os.getenv("PLAYWRIGHT_MAX_RETRIES", "2"))
+    retry_backoff_ms = int(os.getenv("PLAYWRIGHT_RETRY_BACKOFF_MS", "1000"))
+    locale = os.getenv("PLAYWRIGHT_LOCALE", "en-US")
+    timezone_id = os.getenv("PLAYWRIGHT_TZ", "UTC")
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    MAX_RESPONSES = 50
+    MAX_BODY_PREVIEW = 50 * 1024
+
+    started_overall = datetime.now(timezone.utc)
+    last_error: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            with sync_playwright() as p:
+                browser, context, page = _create_context(
+                    p,
+                    headless=headless,
+                    user_agent=user_agent,
+                    locale=locale,
+                    timezone_id=timezone_id,
+                )
+                network: List[Dict[str, Any]] = []
+                _attach_network_listener(page, network, max_responses=MAX_RESPONSES, max_preview=MAX_BODY_PREVIEW)
+                inner_text = _navigate_and_capture(
+                    page,
+                    url,
+                    nav_timeout_ms=nav_timeout_ms,
+                    settle_delay_ms=settle_delay_ms,
+                )
+                context.close()
+                browser.close()
+
+            if inner_text or network:
+                completed_overall = datetime.now(timezone.utc)
+                duration_sec = int((completed_overall - started_overall).total_seconds())
+                return inner_text, network, duration_sec, started_overall, completed_overall
+            else:
+                last_error = RuntimeError("Empty page and no network captured")
+                raise last_error
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < max_retries:
+                backoff = (attempt + 1) * retry_backoff_ms / 1000.0
+                logger.info("Retrying %s in %.2fs due to: %s", url, backoff, exc)
+                time.sleep(backoff)
+            else:
+                break
+
+    completed_overall = datetime.now(timezone.utc)
+    duration_sec = int((completed_overall - started_overall).total_seconds())
+    raise RuntimeError(f"Failed after {max_retries + 1} attempts: {last_error}")
 
 
 @celery_app.task(name="scrape.process_request")
@@ -39,24 +208,45 @@ def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
         db_utils.update_task_status(db, task_id=task_id, status="IN_PROGRESS")
         logger.info(f"Task {task_id} started for URL: {url}")
 
-        # Simulate scraping work
-        time.sleep(1)
+        inner_text, network, duration_sec, started, completed = _browse_and_capture(url)
 
-        # Simulate a successful extraction result
-        result = {
-            "items": [
-                {"text": "Example item 1", "source": "simulated", "confidence": 0.9},
-                {"text": "Example item 2", "source": "simulated", "confidence": 0.85},
-            ]
+        # Persist captured data into DB
+        try:
+            # Update fields using an UPDATE query to avoid SQLAlchemy attribute typing issues
+            from services.api.db_models import ScrapingTask  # local import
+
+            db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update(
+                {
+                    ScrapingTask.page_content: inner_text,
+                    ScrapingTask.network_requests: network,
+                    ScrapingTask.processing_time_seconds: duration_sec,
+                    ScrapingTask.started_at: started,
+                    ScrapingTask.completed_at: completed,
+                    ScrapingTask.status: "SUCCESS",
+                }
+            )
+            db.commit()
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.exception("Failed to persist captured data for %s: %s", task_id, persist_exc)
+            db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message=str(persist_exc))
+            raise
+
+        logger.info(
+            "Task %s completed successfully; captured innerText length=%s, responses=%s",
+            task_id,
+            len(inner_text),
+            len(network),
+        )
+
+        return {
+            "task_id": task_id,
+            "status": "SUCCESS",
+            "meta": {
+                "inner_text_length": len(inner_text),
+                "responses_captured": len(network),
+                "processing_time_seconds": duration_sec,
+            },
         }
-
-        # Persist a minimal success footprint (optional for now)
-        # Here we could update extracted_data/total_matches etc. For Task #203,
-        # we just mark status SUCCESS.
-        db_utils.update_task_status(db, task_id=task_id, status="SUCCESS")
-        logger.info(f"Task {task_id} completed successfully")
-
-        return {"task_id": task_id, "status": "SUCCESS", "result": result}
     except Exception as exc:  # noqa: BLE001
         logger.exception(f"Task {task_id} failed: {exc}")
         db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message=str(exc))
