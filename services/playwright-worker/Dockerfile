@@ -9,14 +9,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Workdir
 WORKDIR /app
 
-# Copy project
-COPY . .
-
-# Install project requirements (use top-level requirements from API to keep in sync)
+# Install project requirements (reuse API requirements to keep deps in sync)
 COPY services/api/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/requirements.txt \
+    # Ensure playwright python package is present (base image usually has it)
+    && pip install --no-cache-dir "playwright==1.44.0"
 
-# Copy entire repo (for shared modules and services)
+# Copy repository code
 COPY . /app
 
 # Default environment values
