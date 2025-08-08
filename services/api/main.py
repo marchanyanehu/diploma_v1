@@ -10,8 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
+from uuid import uuid4
 import logging
 
 # Import database components
@@ -85,7 +86,7 @@ async def root() -> Dict[str, Any]:
         "message": "Intelligent Web Data Aggregator API",
         "version": "1.0.0",
         "status": "operational",
-        "timestamp": datetime.utcnow().isoformat(),
+    "timestamp": datetime.now(timezone.utc).isoformat(),
         "documentation": "/docs",
         "health_check": "/health"
     }
@@ -101,7 +102,7 @@ async def health_check() -> Dict[str, Any]:
     """
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+    "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": "api",
         "version": "1.0.0",
         "uptime": "operational"
@@ -130,7 +131,7 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
     return {
         "api_version": "v1",
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+    "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": {
             "status": db_status,
             "tasks_count": task_count,
@@ -144,6 +145,47 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
     }
 
 
+@app.post(
+    "/api/v1/process",
+    response_model=TaskResponse,
+    status_code=202,
+    tags=["API v1"],
+    summary="Create a scraping task",
+    description=(
+        "Accepts a URL and a natural language prompt, creates a background scraping "
+        "task (initially PENDING), and returns its task_id for status polling."
+    ),
+)
+async def process_request(
+    request: ScrapeRequest,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """
+    Create a new scraping task for the provided URL and prompt.
+
+    Note: Actual async processing is added in Task #203. For now, we persist
+    a PENDING task and return its identifier so clients can poll status later.
+    """
+    task_id = str(uuid4())
+    try:
+        # Best-effort persistence; if DB is unavailable, continue gracefully
+        db_utils.create_scraping_task(
+            db=db,
+            task_id=task_id,
+            url=str(request.url),
+            user_prompt=request.prompt,
+            status=TaskStatus.PENDING.value,
+        )
+    except Exception as e:
+        logger.warning(f"DB unavailable or failed to persist task {task_id}: {e}")
+
+    return TaskResponse(
+        task_id=task_id,
+        status=TaskStatus.PENDING,
+        message="Task created successfully",
+    )
+
+
 @app.post("/api/v1/test-task", tags=["Testing", "API v1"])
 async def create_test_task(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
@@ -155,7 +197,7 @@ async def create_test_task(db: Session = Depends(get_db)) -> Dict[str, Any]:
         # Create a test task
         task = db_utils.create_scraping_task(
             db=db,
-            task_id=f"test-{datetime.utcnow().isoformat()}",
+            task_id=f"test-{datetime.now(timezone.utc).isoformat()}",
             url="https://example.com",
             user_prompt="Test task for database verification",
             status="PENDING"
@@ -186,7 +228,7 @@ async def not_found_handler(request, exc):
         content={
             "error": "Not Found",
             "message": "The requested resource was not found",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 
@@ -199,7 +241,7 @@ async def internal_error_handler(request, exc):
         content={
             "error": "Internal Server Error",
             "message": "An internal server error occurred",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 
