@@ -18,7 +18,14 @@ import logging
 # Import database components
 from .database import get_db, create_tables
 from .db_models import ScrapingTask, ParserCache
-from .models import ScrapeRequest, TaskResponse, TaskStatus, TaskStatusResponse
+from .models import (
+    ScrapeRequest,
+    TaskResponse,
+    TaskStatus,
+    TaskStatusResponse,
+    ScrapeResult,
+    ErrorResponse,
+)
 from . import db_utils
 from shared.celery_app import celery_app
 
@@ -255,6 +262,99 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskSt
         message=err_msg,
         created_at=created_at,
         updated_at=updated_at,
+    )
+
+
+@app.get(
+    "/api/v1/result/{task_id}",
+    response_model=ScrapeResult,
+    tags=["API v1"],
+    summary="Get final result for a completed task",
+    description=(
+        "Retrieve the final extracted data for a task once it has completed successfully."
+    ),
+    responses={
+        202: {"model": TaskStatusResponse, "description": "Task not completed yet"},
+        400: {"model": ErrorResponse, "description": "Task failed"},
+        404: {"model": ErrorResponse, "description": "Task not found"},
+    },
+)
+async def get_task_result(task_id: str, db: Session = Depends(get_db)) -> Any:
+    """
+    Return the final scraping result when the task is SUCCESS. If the task
+    is still running, return 202 with current status. If it failed, return 400.
+    """
+    try:
+        task = db_utils.get_scraping_task(db, task_id)
+    except Exception as e:
+        logger.error(f"Failed to query task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to query task result")
+
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Normalize status enum
+    try:
+        status_enum = TaskStatus(task.status)
+    except ValueError:
+        status_enum = TaskStatus.FAILED
+
+    if status_enum in {TaskStatus.PENDING, TaskStatus.IN_PROGRESS}:
+        created_at: datetime = cast(
+            datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
+        )
+        updated_at: datetime = cast(
+            datetime,
+            getattr(task, "completed_at", None)
+            or getattr(task, "started_at", None)
+            or created_at,
+        )
+        # Return 202 with status payload
+        return JSONResponse(
+            status_code=202,
+            content=TaskStatusResponse(
+                task_id=cast(str, getattr(task, "task_id", "")),
+                status=status_enum,
+                progress=None,
+                message=None,
+                created_at=created_at,
+                updated_at=updated_at,
+            ).model_dump(),
+        )
+
+    if status_enum is TaskStatus.FAILED:
+        err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
+        raise HTTPException(status_code=400, detail=f"Task failed: {err_msg or 'unspecified error'}")
+
+    # SUCCESS path: build ScrapeResult
+    url_value: str = cast(str, getattr(task, "url", ""))
+    prompt_value: str = cast(str, getattr(task, "user_prompt", ""))
+    data_payload = getattr(task, "extracted_data", None) or []
+    created_at: datetime = cast(
+        datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
+    )
+    completed_at: Optional[datetime] = cast(Optional[datetime], getattr(task, "completed_at", None))
+    processing_seconds: Optional[int] = cast(Optional[int], getattr(task, "processing_time_seconds", None))
+    used_cached: bool = bool(getattr(task, "used_cached_parser", False))
+    total_matches: Optional[int] = cast(Optional[int], getattr(task, "total_matches", None))
+    parser_id: Optional[int] = cast(Optional[int], getattr(task, "used_parser_id", None))
+
+    metadata: Dict[str, Any] = {
+        "total_matches": total_matches,
+        "used_cached_parser": used_cached,
+        "used_parser_id": parser_id,
+    }
+
+    return ScrapeResult(
+        task_id=cast(str, getattr(task, "task_id", "")),
+        status=status_enum,
+        url=cast(Any, url_value),
+        prompt=prompt_value,
+        data=data_payload,  # expected to align with ExtractedData schema when present
+        metadata={k: v for k, v in metadata.items() if v is not None},
+        processing_time=float(processing_seconds) if processing_seconds is not None else None,
+        created_at=created_at,
+        completed_at=completed_at,
     )
 
 
