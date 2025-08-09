@@ -48,9 +48,13 @@ class Settings(BaseSettings):
     celery_result_backend: str = Field(default=DEFAULT_REDIS_URL, alias="CELERY_RESULT_BACKEND")
     
     # LLM API Configuration
+    # We support multiple providers via LiteLLM. Keys are optional; specific provider
+    # clients (e.g. Gemini) are resolved at runtime inside shared.llm_client.
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
-    llm_model: str = Field(default="gpt-3.5-turbo", alias="LLM_MODEL")
+    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
+    gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
+    llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")  # default to gemini for project focus
+    llm_model: str = Field(default="gemini-2.0-flash", alias="LLM_MODEL")
     
     # Security
     secret_key: str = Field(default="your-secret-key-change-in-production", alias="SECRET_KEY")

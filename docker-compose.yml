@@ -14,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
-    healthcheck:
+  healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d diploma_db"]
       interval: 30s
       timeout: 10s
@@ -29,7 +29,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    healthcheck:
+  healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
@@ -54,6 +54,12 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - DEBUG=${DEBUG:-true}
+  # LLM (Gemini / OpenAI via LiteLLM)
+  - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+  - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
+  - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+  - GEMINI_API_KEY=${GEMINI_API_KEY}
+  - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +93,12 @@ services:
       - PLAYWRIGHT_RETRY_BACKOFF_MS=${PLAYWRIGHT_RETRY_BACKOFF_MS:-1000}
       - PLAYWRIGHT_LOCALE=${PLAYWRIGHT_LOCALE:-en-US}
       - PLAYWRIGHT_TZ=${PLAYWRIGHT_TZ:-UTC}
+  # LLM (Gemini / OpenAI via LiteLLM)
+  - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+  - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
+  - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+  - GEMINI_API_KEY=${GEMINI_API_KEY}
+  - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

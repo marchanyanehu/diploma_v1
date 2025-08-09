@@ -15,7 +15,7 @@ An intelligent service that accepts a URL and a natural language prompt (e.g., "
 - **Async Tasks:** Celery with Redis broker
 - **Testing:** Pytest, pytest-cov
 - **Containerization:** Docker, Docker Compose
-- **AI:** Large Language Model APIs (OpenAI API)
+- **AI:** Large Language Model APIs (Gemini via Google AI Studio, OpenAI through LiteLLM abstraction)
 - **CI/CD:** GitHub Actions
 
 ## 🏗️ Architecture
@@ -47,12 +47,26 @@ Microservice-based architecture with the following core services:
    # Edit .env with your configuration
    ```
 
-3. **Start the services:**
+3. **(Optional) Configure LLM provider (Gemini default):**
+   Edit your `.env` and set (Gemini recommended):
+   ```bash
+   LLM_PROVIDER=gemini
+   LLM_MODEL=gemini-2.0-flash
+   GOOGLE_API_KEY=your_gemini_key_here  # or GEMINI_API_KEY
+   ```
+   To use OpenAI instead:
+   ```bash
+   LLM_PROVIDER=openai
+   LLM_MODEL=gpt-4o-mini  # or another available model
+   OPENAI_API_KEY=sk-...
+   ```
+
+4. **Start the services:**
    ```bash
    docker-compose up --build
    ```
 
-4. **Access the API:**
+5. **Access the API:**
    - API Documentation: http://localhost:8000/docs
    - API Endpoints: http://localhost:8000/api/v1/
 

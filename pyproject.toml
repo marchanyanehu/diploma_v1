@@ -47,6 +47,8 @@ dependencies = [
     # LLM Integration  
     "openai>=1.3.0",
     "anthropic>=0.7.0",
+    "litellm>=1.48.0",  # Unified interface (Gemini, OpenAI, etc.)
+    "google-generativeai>=0.7.0",  # Direct Gemini SDK (fallback / optional)
     
     # Data Validation & Serialization
     "pydantic>=2.5.0",
