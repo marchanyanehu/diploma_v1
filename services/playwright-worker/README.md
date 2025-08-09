@@ -13,6 +13,7 @@ Environment variables (see `.env.example`):
 - REDIS_URL, CELERY_BROKER_URL, CELERY_RESULT_BACKEND
 - DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 - PLAYWRIGHT_HEADLESS, PLAYWRIGHT_TIMEOUT (for future tasks)
+- GOOGLE_API_KEY or GEMINI_API_KEY (for Gemini/AI Studio via LiteLLM)
 
 Run with Docker Compose:
 

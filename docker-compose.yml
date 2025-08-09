@@ -19,6 +19,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+  restart: unless-stopped
 
   # Redis for Celery (future use)
   redis:
@@ -33,6 +34,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+  restart: unless-stopped
 
   # FastAPI development server (optional - for containerized development)
   api:
@@ -77,6 +79,14 @@ services:
       - DB_NAME=${POSTGRES_DB:-diploma_db}
       - DB_USER=${POSTGRES_USER:-postgres}
       - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
+      # Playwright behavior tuning (performance vs stealth)
+      - PLAYWRIGHT_HEADLESS=${PLAYWRIGHT_HEADLESS:-true}
+      - PLAYWRIGHT_NAV_TIMEOUT_MS=${PLAYWRIGHT_NAV_TIMEOUT_MS:-30000}
+      - PLAYWRIGHT_SETTLE_DELAY_MS=${PLAYWRIGHT_SETTLE_DELAY_MS:-500}
+      - PLAYWRIGHT_MAX_RETRIES=${PLAYWRIGHT_MAX_RETRIES:-2}
+      - PLAYWRIGHT_RETRY_BACKOFF_MS=${PLAYWRIGHT_RETRY_BACKOFF_MS:-1000}
+      - PLAYWRIGHT_LOCALE=${PLAYWRIGHT_LOCALE:-en-US}
+      - PLAYWRIGHT_TZ=${PLAYWRIGHT_TZ:-UTC}
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +94,8 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
+    shm_size: 1gb
+    restart: unless-stopped
     command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "default"]
 
 volumes:

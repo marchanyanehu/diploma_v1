@@ -48,7 +48,7 @@
 *Цель: Реализовать основную бизнес-логику, включающую взаимодействие с LLM для анализа, генерации и валидации.*
 
 - **`Task #401`**: `[LLM]` Create an abstraction layer/client for interacting with the LLM API (e.g., OpenAI, Anthropic). Handle API keys and retries.
-- **`Task #402`**: `[LLM-Prompt]` **Prompt Engineering (Intent):** Design a prompt that takes the user's free-form text and extracts a structured intent (e.g., `{"target": "job links", "keywords": ["Software Engineer", "Senior"]}`).
+- **`Task #402`**: `[LLM-Prompt]` **Prompt Engineering (Intent):** Design a prompt that takes the user's free-form text and extracts a structured intent (e.g., `{"target": "job links", "input": "i want to have jobs scraped here"}`).
 - **`Task #403`**: `[Core Logic]` Implement the step to find examples of the target data within the captured `innerText` using the keywords from the LLM.
 - **`Task #404`**: `[Core Logic]` Implement the logic to locate the origin of these examples within the captured network sources (main document HTML, JSON from an XHR, etc.).
 - **`Task #405`**: `[Core Logic]` Implement a function to extract a small, relevant code snippet around the found example to use as context for the LLM.
