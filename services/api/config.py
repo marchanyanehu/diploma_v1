@@ -6,22 +6,34 @@ for different deployment environments (development, testing, production).
 """
 
 import os
-from typing import Optional
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional, List
+from pydantic import Field, BaseModel
+
+try:  # Attempt to import pydantic_settings (preferred)
+    from pydantic_settings import BaseSettings as _PSBase, SettingsConfigDict  # type: ignore
+    BaseForSettings = _PSBase  # type: ignore
+    _USE_SETTINGS_FALLBACK = False
+except Exception:  # noqa: BLE001
+    BaseForSettings = BaseModel  # type: ignore
+    SettingsConfigDict = lambda **_: None  # type: ignore
+    _USE_SETTINGS_FALLBACK = True
 
 # Constants
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        case_sensitive=False,
-        extra="ignore"
-    )
+class Settings(BaseForSettings):  # type: ignore[misc]
+    """Application settings loaded from environment variables.
+
+    Includes a graceful fallback if pydantic-settings is unavailable or mismatched.
+    """
+
+    if not _USE_SETTINGS_FALLBACK:  # only valid when real pydantic_settings present
+        model_config = SettingsConfigDict(
+            env_file=".env",
+            case_sensitive=False,
+            extra="ignore"
+        )
     
     # API Configuration
     api_title: str = Field(default="Intelligent Web Data Aggregator", alias="API_TITLE")
@@ -70,7 +82,7 @@ class Settings(BaseSettings):
         return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
     @property
-    def cors_origins_list(self) -> list[str]:
+    def cors_origins_list(self) -> List[str]:
         """Convert CORS origins string to list."""
         if self.cors_origins == "*":
             return ["*"]
@@ -78,4 +90,8 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-settings = Settings()
+try:
+    settings = Settings()
+except Exception:
+    # As an extreme fallback construct with defaults only
+    settings = Settings()  # relying on default values

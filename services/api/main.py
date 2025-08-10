@@ -5,7 +5,7 @@ This module initializes the FastAPI application and defines the core API endpoin
 for processing web scraping requests using natural language prompts.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -53,6 +53,20 @@ tags_metadata = [
     },
 ]
 
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # type: ignore[override]
+    try:
+        create_tables()
+        logger.info("Database tables created successfully")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Database not available: {e}")
+        logger.info("Running in development mode without database")
+    yield
+
+
 app = FastAPI(
     title="Intelligent Web Data Aggregator",
     description="""
@@ -78,6 +92,7 @@ app = FastAPI(
         "url": "https://opensource.org/licenses/MIT",
     },
     openapi_tags=tags_metadata,
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -90,16 +105,7 @@ app.add_middleware(
 )
 
 
-# Create database tables on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables on application startup."""
-    try:
-        create_tables()
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.warning(f"Database not available: {e}")
-        logger.info("Running in development mode without database")
+## Startup hook replaced by lifespan
 
 
 @app.get("/", tags=["Root"])

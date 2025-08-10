@@ -12,7 +12,7 @@ import os
 import time
 import random
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Iterable, Optional, cast
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -24,6 +24,11 @@ from shared.celery_app import celery_app
 # In a larger project you'd extract shared DB code into `shared/`.
 from services.api.database import SessionLocal
 from services.api import db_utils
+from shared.intent_extraction import extract_intent
+from shared.example_finder import find_target_examples
+from shared.snippet_extractor import extract_snippet_around_example
+from shared import regex_generation
+from shared.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +135,15 @@ def _browse_and_capture(url: str) -> Tuple[str, List[Dict[str, Any]], int, datet
     Returns:
         inner_text, network_events, duration_seconds, started_at, completed_at
     """
+    # Allow tests to bypass Playwright (no browser dependency in CI/unit tests)
+    if os.getenv("PLAYWRIGHT_SKIP", "").lower() in {"1", "true", "yes"}:
+        dummy_text = (
+            "Senior Python Developer Remote Europe\n"
+            "Job Title: Data Scientist\n"
+            "Apply now for remote python jobs.\n"
+        )
+        return dummy_text, [], 0, datetime.now(timezone.utc), datetime.now(timezone.utc)
+
     from playwright.sync_api import sync_playwright  # type: ignore
 
     # Configurable knobs
@@ -196,55 +210,151 @@ def _browse_and_capture(url: str) -> Tuple[str, List[Dict[str, Any]], int, datet
 
 @celery_app.task(name="scrape.process_request")
 def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
-    """Background task entrypoint for processing a scraping request.
+    """End-to-end pipeline for a scraping task with reuse + generation.
 
-    For now, it simulates work with sleeps and updates DB status. It returns
-    a simple result payload. Subsequent tasks will perform real scraping
-    and LLM-driven extraction.
+    Keeps sub-steps in small local helper functions to reduce complexity.
     """
     db = SessionLocal()
     try:
         # Mark as IN_PROGRESS
         db_utils.update_task_status(db, task_id=task_id, status="IN_PROGRESS")
         logger.info(f"Task {task_id} started for URL: {url}")
+        llm = LLMClient.from_env()
+        # ---- Helpers ---- #
+        def do_intent() -> Dict[str, Any]:
+            return extract_intent(prompt, llm=llm)
 
-        inner_text, network, duration_sec, started, completed = _browse_and_capture(url)
+        def capture() -> Tuple[str, List[Dict[str, Any]], int, datetime, datetime]:
+            return _browse_and_capture(url)
 
-        # Persist captured data into DB
-        try:
-            # Update fields using an UPDATE query to avoid SQLAlchemy attribute typing issues
-            from services.api.db_models import ScrapingTask  # local import
+        def apply_regex(pattern: str, flags: str, source: str) -> List[str]:
+            import re
+            re_flags = 0
+            if 'i' in flags: re_flags |= re.IGNORECASE
+            if 'm' in flags: re_flags |= re.MULTILINE
+            if 's' in flags: re_flags |= re.DOTALL
+            try:
+                rx = re.compile(pattern, re_flags)
+            except Exception:
+                return []
+            out: List[str] = []
+            for m in rx.finditer(source):
+                if m.lastindex and m.lastindex >= 1:
+                    out.append(m.group(1))
+                else:
+                    out.append(m.group(0))
+            return out
 
-            db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update(
-                {
-                    ScrapingTask.page_content: inner_text,
-                    ScrapingTask.network_requests: network,
-                    ScrapingTask.processing_time_seconds: duration_sec,
-                    ScrapingTask.started_at: started,
-                    ScrapingTask.completed_at: completed,
-                    ScrapingTask.status: "SUCCESS",
-                }
+        def try_reuse(domain: str, inner_text: str, keywords: List[str]):
+            parsers = db_utils.find_cached_parser(db, domain, keywords=keywords)
+            for p in parsers:
+                stored = cast(str, p.generated_regex)
+                import re as _re
+                m = _re.match(r"\(\?([ims]+):(.*)\)$", stored)
+                p_flags = m.group(1) if m else ""
+                p_pattern = m.group(2) if m else stored
+                matches = apply_regex(p_pattern, p_flags, inner_text)
+                if matches:
+                    return p, p_pattern, p_flags, matches
+            return None, None, "", []  # type: ignore[return-value]
+
+        def generate_pattern(inner_text: str, keywords: List[str], intent: Dict[str, Any]):
+            examples = find_target_examples(
+                inner_text,
+                keywords=keywords,
+                target=intent.get("target"),
+                max_examples=5,
             )
-            db.commit()
-        except Exception as persist_exc:  # noqa: BLE001
-            logger.exception("Failed to persist captured data for %s: %s", task_id, persist_exc)
-            db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message=str(persist_exc))
-            raise
+            example_texts = [e["text"] for e in examples]
+            snippet_context: str = inner_text[:1500]
+            if example_texts:
+                snip = extract_snippet_around_example(inner_text, example_texts[0], max_chars=800, line_radius=2)
+                snippet_context = cast(str, snip["snippet"])  # ensure str for typing
+            gen = regex_generation.iterative_regex_generation(
+                source=inner_text,
+                examples=example_texts or keywords[:3],
+                target_desc=intent.get("target") or "target data",
+                llm=llm,
+                max_iterations=3,
+                snippet=snippet_context,
+            )
+            if not gen.get("success"):
+                return None, None, []
+            pattern = cast(Optional[str], gen.get("final_pattern")) or ""
+            flags = cast(Optional[str], gen.get("final_flags")) or ""
+            matches = apply_regex(pattern, flags, inner_text)
+            if pattern and matches:
+                db_utils.record_new_parser(
+                    db,
+                    task_id=task_id,
+                    url=url,
+                    intent=intent,
+                    pattern=pattern,
+                    flags=flags,
+                    matches_count=len(matches),
+                    source_type="HTML",
+                    sample_input=snippet_context,
+                    sample_output=[{"text": m} for m in matches[:5]],
+                )
+            return pattern, flags, matches
+
+        # ---- Pipeline ---- #
+        intent = do_intent()
+        keywords = intent.get("keywords", [])
+        inner_text, network, duration_sec, started, completed = capture()
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc
+        used_parser, pattern_applied, flags_applied, reuse_matches = try_reuse(domain, inner_text, keywords)
+
+        used_cached = bool(reuse_matches)
+        matches: List[str]
+        if reuse_matches:
+            matches = reuse_matches
+        else:
+            pattern_applied, flags_applied, gen_matches = generate_pattern(inner_text, keywords, intent)
+            matches = gen_matches
+
+        extracted = [
+            {"text": m, "source": "innerText", "confidence": 1.0 if used_cached else 0.9}
+            for m in matches
+        ]
+
+        if matches:
+            db_utils.persist_extraction_result(
+                db,
+                task_id,
+                extracted_data=extracted,
+                total_matches=len(matches),
+                used_parser=used_parser,
+                processing_time_seconds=duration_sec,
+                started_at=started,
+                completed_at=completed,
+                used_cached_parser=used_cached,
+            )
+        else:
+            db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message="No matches extracted")
 
         logger.info(
-            "Task %s completed successfully; captured innerText length=%s, responses=%s",
+            "Task %s finished; target=%s pattern=%s matches=%d reused=%s",
             task_id,
-            len(inner_text),
-            len(network),
+            intent.get("target"),
+            pattern_applied,
+            len(matches),
+            used_cached,
         )
 
         return {
             "task_id": task_id,
-            "status": "SUCCESS",
+            "status": "SUCCESS" if matches else "FAILED",
             "meta": {
                 "inner_text_length": len(inner_text),
                 "responses_captured": len(network),
                 "processing_time_seconds": duration_sec,
+                "intent": intent,
+                "pattern": pattern_applied,
+                "flags": flags_applied,
+                "matches": len(matches),
+                "used_cached": used_cached,
             },
         }
     except Exception as exc:  # noqa: BLE001

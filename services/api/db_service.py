@@ -8,7 +8,7 @@ including CRUD operations and business logic for scraping tasks and parser cache
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from urllib.parse import urlparse
 
@@ -101,7 +101,7 @@ class DatabaseService:
             task.error_message = error_message
         
         # Update timestamps based on status
-        now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
         if status == "IN_PROGRESS" and not task.started_at:
             task.started_at = now
         elif status in ["SUCCESS", "FAILED"]:
@@ -326,7 +326,7 @@ class DatabaseService:
         old_confidence = parser.confidence_score or 100
         
         parser.times_used = old_times_used + 1
-        parser.last_used_at = datetime.utcnow()
+    parser.last_used_at = datetime.now(timezone.utc)
         
         if success:
             # Maintain or slightly increase confidence
@@ -393,7 +393,7 @@ class DatabaseService:
         )
         
         # Recently used parsers (last 7 days)
-        week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
         recently_used = (
             self.db.query(ParserCache)
             .filter(ParserCache.last_used_at >= week_ago)

@@ -7,7 +7,7 @@ ensuring proper validation and serialization of requests and responses.
 
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -65,7 +65,7 @@ class TaskResponse(BaseModel):
         description="Human-readable message about the task creation"
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the task was created"
     )
 
@@ -220,7 +220,7 @@ class ErrorResponse(BaseModel):
         description="Additional error details"
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Error occurrence timestamp"
     )
 
@@ -233,7 +233,7 @@ class HealthResponse(BaseModel):
         description="Service health status"
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Health check timestamp"
     )
     version: str = Field(
