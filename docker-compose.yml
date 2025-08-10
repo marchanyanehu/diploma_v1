@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # PostgreSQL database
   postgres:
     image: postgres:15-alpine
     container_name: diploma_postgres
@@ -14,14 +11,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
-  healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d diploma_db"]
-      interval: 30s
-      timeout: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-diploma_db}"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-  restart: unless-stopped
+    restart: unless-stopped
 
-  # Redis for Celery (future use)
   redis:
     image: redis:7-alpine
     container_name: diploma_redis
@@ -29,14 +25,13 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-  healthcheck:
+    healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
-  restart: unless-stopped
+    restart: unless-stopped
 
-  # FastAPI development server (optional - for containerized development)
   api:
     build:
       context: .
@@ -47,19 +42,20 @@ services:
     env_file:
       - .env
     environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=${POSTGRES_DB:-diploma_db}
-      - DB_USER=${POSTGRES_USER:-postgres}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - DEBUG=${DEBUG:-true}
-  # LLM (Gemini / OpenAI via LiteLLM)
-  - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
-  - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
-  - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-  - GEMINI_API_KEY=${GEMINI_API_KEY}
-  - OPENAI_API_KEY=${OPENAI_API_KEY}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-diploma_db}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      DEBUG: ${DEBUG:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,6 +64,7 @@ services:
     volumes:
       - ./:/app
     command: ["python", "-m", "uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    restart: unless-stopped
 
   worker:
     build:
@@ -77,28 +74,26 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/0}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=${POSTGRES_DB:-diploma_db}
-      - DB_USER=${POSTGRES_USER:-postgres}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres123}
-      # Playwright behavior tuning (performance vs stealth)
-      - PLAYWRIGHT_HEADLESS=${PLAYWRIGHT_HEADLESS:-true}
-      - PLAYWRIGHT_NAV_TIMEOUT_MS=${PLAYWRIGHT_NAV_TIMEOUT_MS:-30000}
-      - PLAYWRIGHT_SETTLE_DELAY_MS=${PLAYWRIGHT_SETTLE_DELAY_MS:-500}
-      - PLAYWRIGHT_MAX_RETRIES=${PLAYWRIGHT_MAX_RETRIES:-2}
-      - PLAYWRIGHT_RETRY_BACKOFF_MS=${PLAYWRIGHT_RETRY_BACKOFF_MS:-1000}
-      - PLAYWRIGHT_LOCALE=${PLAYWRIGHT_LOCALE:-en-US}
-      - PLAYWRIGHT_TZ=${PLAYWRIGHT_TZ:-UTC}
-  # LLM (Gemini / OpenAI via LiteLLM)
-  - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
-  - LLM_MODEL=${LLM_MODEL:-gemini-2.0-flash}
-  - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-  - GEMINI_API_KEY=${GEMINI_API_KEY}
-  - OPENAI_API_KEY=${OPENAI_API_KEY}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-diploma_db}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+      PLAYWRIGHT_NAV_TIMEOUT_MS: ${PLAYWRIGHT_NAV_TIMEOUT_MS:-30000}
+      PLAYWRIGHT_SETTLE_DELAY_MS: ${PLAYWRIGHT_SETTLE_DELAY_MS:-500}
+      PLAYWRIGHT_MAX_RETRIES: ${PLAYWRIGHT_MAX_RETRIES:-2}
+      PLAYWRIGHT_RETRY_BACKOFF_MS: ${PLAYWRIGHT_RETRY_BACKOFF_MS:-1000}
+      PLAYWRIGHT_LOCALE: ${PLAYWRIGHT_LOCALE:-en-US}
+      PLAYWRIGHT_TZ: ${PLAYWRIGHT_TZ:-UTC}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
