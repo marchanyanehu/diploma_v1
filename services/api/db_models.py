@@ -56,6 +56,12 @@ class ScrapingTask(Base):
     # Source data captured during scraping
     page_content = Column(Text, nullable=True)  # Raw page content (innerText)
     network_requests = Column(JSON, nullable=True)  # Captured network requests
+
+    # Intent & source mapping (added migration 0002)
+    intent_target = Column(Text, nullable=True)
+    intent_keywords = Column(JSON, nullable=True)
+    chosen_source_url = Column(Text, nullable=True)
+    chosen_source_type = Column(String(50), nullable=True)
     
     # Relationships
     used_parser_id = Column(Integer, ForeignKey("parsers_cache.id"), nullable=True)

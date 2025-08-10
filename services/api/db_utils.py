@@ -121,6 +121,56 @@ def update_task_status(
     return task
 
 
+def update_task_sources(
+    db: Session,
+    task_id: str,
+    *,
+    page_content: Optional[str] = None,
+    network_requests: Optional[List[Dict[str, Any]]] = None,
+    intent: Optional[Dict[str, Any]] = None,
+    started_at: Optional[datetime] = None,
+) -> None:
+    """Persist raw capture artifacts early in the pipeline.
+
+    This allows later debugging / iterative improvement even if regex generation
+    fails. Truncates large blobs defensively.
+    """
+    task = get_scraping_task(db, task_id)
+    if not task:  # silently ignore if missing
+        return
+    MAX_PAGE_LEN = 500_000  # ~500 KB safeguard
+    MAX_NETWORK_EVENTS = 100
+    MAX_BODY_PREVIEW_LEN = 50_000
+    safe_page = None
+    if page_content is not None:
+        safe_page = page_content[:MAX_PAGE_LEN]
+    safe_network: List[Dict[str, Any]] | None = None
+    if network_requests is not None:
+        trimmed: List[Dict[str, Any]] = []
+        for ev in network_requests[:MAX_NETWORK_EVENTS]:
+            ev_copy = dict(ev)
+            body_prev = ev_copy.get("body_preview")
+            if isinstance(body_prev, str) and len(body_prev) > MAX_BODY_PREVIEW_LEN:
+                ev_copy["body_preview"] = body_prev[:MAX_BODY_PREVIEW_LEN]
+                ev_copy["body_truncated"] = True
+            trimmed.append(ev_copy)
+        safe_network = trimmed
+    update_data: Dict[Any, Any] = {}
+    if safe_page is not None:
+        update_data[ScrapingTask.page_content] = safe_page
+    if safe_network is not None:
+        update_data[ScrapingTask.network_requests] = safe_network
+    if started_at is not None:
+        update_data[ScrapingTask.started_at] = started_at
+    # Optionally persist intent keywords for quick reuse heuristics
+    if intent:
+        update_data[ScrapingTask.intent_target] = intent.get("target")
+        update_data[ScrapingTask.intent_keywords] = intent.get("keywords")
+    if update_data:
+        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update(update_data)
+        db.commit()
+
+
 def persist_extraction_result(
     db: Session,
     task_id: str,

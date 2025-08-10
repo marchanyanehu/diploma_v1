@@ -30,6 +30,82 @@ from shared.snippet_extractor import extract_snippet_around_example
 from shared import regex_generation
 from shared.llm_client import LLMClient
 
+# ---------------- Source Mapping & Disambiguation Helpers (Sprint 1) ---------------- #
+
+def _search_examples_in_network(examples: list[str], network: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return list of candidate sources where any example substring appears.
+
+    Each returned dict includes: url, source_type, match_count, snippet.
+    """
+    results: list[dict[str, Any]] = []
+    for ev in network:
+        body = ev.get("body_preview") or ""
+        if not body:
+            continue
+        matches = 0
+        for ex in examples:
+            if ex and ex in body:
+                matches += 1
+        if matches:
+            # Build small snippet around first example hit
+            first = next((ex for ex in examples if ex in body), None)
+            snippet = ""
+            if first:
+                idx = body.find(first)
+                start = max(0, idx - 120)
+                end = min(len(body), idx + len(first) + 120)
+                snippet = body[start:end]
+            results.append({
+                "url": ev.get("url"),
+                "source_type": ev.get("response_headers", {}).get("content-type", "network"),
+                "match_count": matches,
+                "snippet": snippet,
+            })
+    # Order by matches desc then snippet length asc
+    results.sort(key=lambda d: (-d["match_count"], len(d.get("snippet", ""))))
+    return results
+
+
+def _disambiguate_source(candidates: list[dict[str, Any]], intent: dict, llm: LLMClient) -> dict | None:
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    # Build compact JSON list (truncate snippets)
+    short_list = [
+        {
+            "url": c["url"],
+            "type": c["source_type"],
+            "match_count": c["match_count"],
+            "snippet": (c.get("snippet") or "")[:300],
+        }
+        for c in candidates[:5]
+    ]
+    messages = [
+        {"role": "system", "content": "You select the most relevant data source. Output ONLY JSON {chosen_url, reason, confidence}."},
+        {"role": "user", "content": (
+            f"INTENT_TARGET: {intent.get('target')}\nINTENT_KEYWORDS: {intent.get('keywords')}\nCANDIDATES: {short_list}\n"
+            "Choose the one that most likely contains the canonical list of requested items."
+        )},
+    ]
+    try:
+        raw = llm.chat(messages, temperature=0.0)
+        import json as _json
+        data = {}
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            pass
+        chosen = data.get("chosen_url") if isinstance(data, dict) else None
+        if chosen:
+            for c in candidates:
+                if c["url"] == chosen:
+                    c["_confidence"] = data.get("confidence")
+                    return c
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Disambiguation LLM failed: %s", exc)
+    return candidates[0]  # fallback first
+
 logger = logging.getLogger(__name__)
 
 
@@ -258,7 +334,7 @@ def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
                     return p, p_pattern, p_flags, matches
             return None, None, "", []  # type: ignore[return-value]
 
-        def generate_pattern(inner_text: str, keywords: List[str], intent: Dict[str, Any]):
+        def generate_pattern(inner_text: str, keywords: List[str], intent: Dict[str, Any], *, source_body: str | None = None):
             examples = find_target_examples(
                 inner_text,
                 keywords=keywords,
@@ -266,12 +342,13 @@ def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
                 max_examples=5,
             )
             example_texts = [e["text"] for e in examples]
-            snippet_context: str = inner_text[:1500]
+            base_source = source_body or inner_text
+            snippet_context: str = base_source[:1500]
             if example_texts:
-                snip = extract_snippet_around_example(inner_text, example_texts[0], max_chars=800, line_radius=2)
+                snip = extract_snippet_around_example(base_source, example_texts[0], max_chars=800, line_radius=2)
                 snippet_context = cast(str, snip["snippet"])  # ensure str for typing
             gen = regex_generation.iterative_regex_generation(
-                source=inner_text,
+                source=base_source,
                 examples=example_texts or keywords[:3],
                 target_desc=intent.get("target") or "target data",
                 llm=llm,
@@ -302,16 +379,69 @@ def process_request_task(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
         intent = do_intent()
         keywords = intent.get("keywords", [])
         inner_text, network, duration_sec, started, completed = capture()
+        # Persist raw sources & intent early for provenance even if later steps fail
+        try:
+            db_utils.update_task_sources(
+                db,
+                task_id,
+                page_content=inner_text,
+                network_requests=network,
+                intent=intent,
+                started_at=started,
+            )
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.warning("Early source persistence failed for %s: %s", task_id, persist_exc)
         from urllib.parse import urlparse
         domain = urlparse(url).netloc
         used_parser, pattern_applied, flags_applied, reuse_matches = try_reuse(domain, inner_text, keywords)
+
+        # Source mapping step (Sprint 1): only if not reused successfully
+        chosen_source_body: str | None = None
+        chosen_source_url: str | None = None
+        chosen_source_type: str | None = None
+        if not reuse_matches:
+            # Build candidate examples first (heuristic); if none, fallback to keywords subset
+            heuristic_examples = [e["text"] for e in find_target_examples(inner_text, keywords=keywords, target=intent.get("target"), max_examples=5)]
+            probe_examples = heuristic_examples or keywords[:3]
+            network_candidates = _search_examples_in_network(probe_examples, network)
+            picked = _disambiguate_source(network_candidates, intent, llm) if network_candidates else None
+            if picked:
+                chosen_source_url = picked.get("url")
+                chosen_source_type = picked.get("source_type")
+                # Attempt to locate full body from original network list
+                for ev in network:
+                    if ev.get("url") == chosen_source_url:
+                        chosen_source_body = ev.get("body_preview") or ""
+                        break
+                # Persist chosen source metadata
+                try:
+                    db.query(db_utils.ScrapingTask).filter(db_utils.ScrapingTask.task_id == task_id)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                db_utils.update_task_sources(
+                    db,
+                    task_id,
+                    page_content=None,
+                    network_requests=None,
+                    intent=None,
+                )
+                # Direct column update for source metadata
+                try:
+                    from services.api.db_models import ScrapingTask as _ST
+                    db.query(_ST).filter(_ST.task_id == task_id).update({
+                        _ST.chosen_source_url: chosen_source_url,
+                        _ST.chosen_source_type: chosen_source_type,
+                    })
+                    db.commit()
+                except Exception as up_exc:  # noqa: BLE001
+                    logger.warning("Failed to persist chosen source for %s: %s", task_id, up_exc)
 
         used_cached = bool(reuse_matches)
         matches: List[str]
         if reuse_matches:
             matches = reuse_matches
         else:
-            pattern_applied, flags_applied, gen_matches = generate_pattern(inner_text, keywords, intent)
+            pattern_applied, flags_applied, gen_matches = generate_pattern(inner_text, keywords, intent, source_body=chosen_source_body)
             matches = gen_matches
 
         extracted = [
