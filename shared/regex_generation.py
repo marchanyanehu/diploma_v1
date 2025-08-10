@@ -179,6 +179,10 @@ class RegexValidationResult:
     too_many_matches: bool
     duplicate_ratio: float
     average_length: float
+    issues: List[str]
+    precision_proxy: float
+    coverage_count: int
+    coverage_ratio: float
     error: str | None
     flags_applied: str
     pattern: str
@@ -192,6 +196,10 @@ class RegexValidationResult:
             "too_many_matches": self.too_many_matches,
             "duplicate_ratio": self.duplicate_ratio,
             "average_length": self.average_length,
+            "issues": self.issues,
+            "precision_proxy": self.precision_proxy,
+            "coverage_count": self.coverage_count,
+            "coverage_ratio": self.coverage_ratio,
             "error": self.error,
             "flags_applied": self.flags_applied,
             "pattern": self.pattern,
@@ -231,63 +239,40 @@ def validate_regex(
 
     Returns dict suitable for logging & refinement logic.
     """
-    if not pattern:
+    # Helper for early failure returns with unified shape
+    def _early_fail(err: str) -> Dict[str, Any]:
+        missing = list(examples)
+        issues: List[str] = ["missing_examples", "zero_matches"] if examples else ["zero_matches"]
         return RegexValidationResult(
             success=False,
             matches=[],
             distinct_matches=[],
-            missing_examples=list(examples),
+            missing_examples=missing,
             too_many_matches=False,
             duplicate_ratio=0.0,
             average_length=0.0,
-            error="empty pattern",
+            issues=issues,
+            precision_proxy=0.0,
+            coverage_count=0,
+            coverage_ratio=0.0,
+            error=err,
             flags_applied=flags,
             pattern=pattern,
         ).to_dict()
+
+    if not pattern:
+        return _early_fail("empty pattern")
 
     if len(pattern) > 500:
-        return RegexValidationResult(
-            success=False,
-            matches=[],
-            distinct_matches=[],
-            missing_examples=list(examples),
-            too_many_matches=False,
-            duplicate_ratio=0.0,
-            average_length=0.0,
-            error="pattern too long",
-            flags_applied=flags,
-            pattern=pattern,
-        ).to_dict()
+        return _early_fail("pattern too long")
 
     if _likely_catastrophic(pattern):
-        return RegexValidationResult(
-            success=False,
-            matches=[],
-            distinct_matches=[],
-            missing_examples=list(examples),
-            too_many_matches=False,
-            duplicate_ratio=0.0,
-            average_length=0.0,
-            error="potential catastrophic backtracking",
-            flags_applied=flags,
-            pattern=pattern,
-        ).to_dict()
+        return _early_fail("potential catastrophic backtracking")
 
     try:
         compiled = re.compile(pattern, _apply_flags(flags))
     except re.error as exc:  # noqa: BLE001
-        return RegexValidationResult(
-            success=False,
-            matches=[],
-            distinct_matches=[],
-            missing_examples=list(examples),
-            too_many_matches=False,
-            duplicate_ratio=0.0,
-            average_length=0.0,
-            error=f"compile_error: {exc}",
-            flags_applied=flags,
-            pattern=pattern,
-        ).to_dict()
+        return _early_fail(f"compile_error: {exc}")
 
     matches: List[str] = []
     for i, m in enumerate(compiled.finditer(source)):
@@ -312,13 +297,25 @@ def validate_regex(
         if examples and not any(ex in distinct for ex in examples):
             missing = list(examples)  # force failure path
 
-    success = (
-        not missing
-        and not too_many
-        and 0.0 <= duplicate_ratio <= 0.85
-        and 2 <= avg_len <= 2000
-        and len(matches) > 0
-    )
+    # Scoring / analytics
+    total_distinct = len(distinct)
+    matched_examples = len(examples) - len(missing) if examples else 0
+    precision_proxy = (matched_examples / total_distinct) if total_distinct else 0.0
+    coverage_count = matched_examples
+    coverage_ratio = (matched_examples / len(examples)) if examples else 0.0
+
+    # Issue classification
+    issues: List[str] = []
+    if not matches:
+        issues.append("zero_matches")
+    if missing:
+        issues.append("missing_examples")
+    if duplicate_ratio > 0.85:
+        issues.append("excessive_duplicates")
+    if avg_len > 2000:
+        issues.append("over_broad_avg_length")
+
+    success = (not issues) and (len(matches) > 0)
 
     return RegexValidationResult(
         success=success,
@@ -328,7 +325,11 @@ def validate_regex(
         too_many_matches=too_many,
         duplicate_ratio=duplicate_ratio,
         average_length=avg_len,
-        error=None if success else ("missing examples" if missing else None),
+        issues=issues,
+        precision_proxy=precision_proxy,
+        coverage_count=coverage_count,
+        coverage_ratio=coverage_ratio,
+        error=None if success else (";".join(issues) if issues else None),
         flags_applied=flags,
         pattern=pattern,
     ).to_dict()
@@ -401,6 +402,10 @@ def iterative_regex_generation(
                 "too_many_matches",
                 "duplicate_ratio",
                 "average_length",
+                "issues",
+                "precision_proxy",
+                "coverage_count",
+                "coverage_ratio",
                 "error",
                 "pattern",
             }
