@@ -93,6 +93,8 @@ class ParserCache(Base):
     user_intent = Column(Text, nullable=False)  # Normalized/processed user prompt
     intent_keywords = Column(JSON, nullable=True)  # Extracted keywords for matching
     target_data_type = Column(String(100), nullable=True)  # e.g., "job_listings", "product_prices"
+    normalized_intent_hash = Column(String(64), nullable=True, index=True)  # SHA1 or similar of normalized intent+keywords
+    keyword_set = Column(JSON, nullable=True)  # canonical lowercase sorted unique keywords for fast overlap
     
     # Parser information
     generated_regex = Column(Text, nullable=False)  # The working regular expression
@@ -104,6 +106,7 @@ class ParserCache(Base):
     confidence_score = Column(Integer, default=100, nullable=False)  # 0-100, decreases with failed reuses
     success_rate = Column(Integer, default=100, nullable=False)  # Percentage of successful reuses
     times_used = Column(Integer, default=0, nullable=False)  # How many times this parser was reused
+    is_active = Column(Boolean, nullable=False, default=True)  # deactivated when confidence decays
     
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

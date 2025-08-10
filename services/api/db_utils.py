@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional, List, Dict, Any, Iterable
 from datetime import datetime, timezone
+import hashlib
 import logging
 
 from .db_models import ScrapingTask, ParserCache
@@ -85,19 +86,23 @@ def find_cached_parser(
         .filter(
             ParserCache.domain == domain,
             ParserCache.confidence_score >= confidence_threshold,
+            ParserCache.is_active == True,  # noqa: E712
         )
         .order_by(ParserCache.confidence_score.desc(), ParserCache.last_used_at.desc().nullslast())
     )
     parsers = list(q.limit(limit))
     if keywords:
         kw_low = {k.lower() for k in keywords if k}
-        scored: List[tuple[int, ParserCache]] = []
+        scored: List[tuple[int, int, ParserCache]] = []
         for p in parsers:
-            p_kws = {k.lower() for k in (p.intent_keywords or [])}
+            p_kws = {k.lower() for k in (p.keyword_set or p.intent_keywords or [])}
             overlap = len(kw_low & p_kws)
-            scored.append((overlap, p))
-        scored.sort(key=lambda t: (-t[0], -t[1].confidence_score))
-        return [p for _, p in scored if _ > 0] or parsers
+            # tie-breaker: Jaccard similarity * 1000
+            jacc = int((overlap / len(p_kws)) * 1000) if p_kws else 0
+            scored.append((overlap, jacc, p))
+        scored.sort(key=lambda t: (-t[0], -t[1], -t[2].confidence_score))
+        filtered = [p for ov, _, p in scored if ov > 0]
+        return filtered or [p for _, _, p in scored]
     return parsers
 
 
@@ -234,6 +239,8 @@ def record_new_parser(
             user_intent=intent.get("target", intent.get("original_input", ""))[:255],
             intent_keywords=intent.get("keywords", [])[:25],
             target_data_type=intent.get("target", "")[:100],
+            normalized_intent_hash=hashlib.sha1("|".join(sorted([intent.get("target", ""), *(intent.get("keywords", []) or [])])).encode("utf-8")).hexdigest(),
+            keyword_set=sorted({k.lower() for k in (intent.get("keywords") or []) if k})[:50],
             generated_regex=stored_regex,
             source_type=source_type,
             source_identifier=url,

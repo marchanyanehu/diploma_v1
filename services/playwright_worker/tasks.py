@@ -99,12 +99,15 @@ def _quick_preflight_reuse(db, url: str, intent: dict, *, max_bytes: int = 250_0
             # decay confidence on miss
             try:
                 current_conf = int(getattr(p, 'confidence_score', 0) or 0)
-                new_conf = max(0, current_conf - 5)
-                db.query(ParserCache).filter(ParserCache.id == p.id).update({
+                new_conf = max(0, current_conf - 10)
+                update_data = {
                     ParserCache.confidence_score: new_conf,
                     ParserCache.times_used: p.times_used + 1,
                     ParserCache.last_used_at: datetime.now(timezone.utc),
-                })
+                }
+                if new_conf < 40:  # quarantine threshold
+                    update_data[ParserCache.is_active] = False
+                db.query(ParserCache).filter(ParserCache.id == p.id).update(update_data)
                 db.commit()
             except Exception:
                 db.rollback()
