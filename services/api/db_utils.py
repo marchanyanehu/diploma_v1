@@ -12,24 +12,38 @@ from datetime import datetime, timezone
 import hashlib
 import logging
 
-from .db_models import ScrapingTask, ParserCache
+from .db_models import ScrapingTask, ParserCache, User, ScheduledJob
 
 logger = logging.getLogger(__name__)
 
+
+def create_user(db: Session, username: str, password_hash: str, email: Optional[str] = None) -> User:
+    """Create a new user."""
+    user = User(username=username, hashed_password=password_hash, email=email)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+def get_user_by_username(db: Session, username: str) -> Optional[User]:
+    """Get user by username."""
+    return db.query(User).filter(User.username == username).first()
 
 def create_scraping_task(
     db: Session,
     task_id: str,
     url: str,
     user_prompt: str,
-    status: str = "PENDING"
+    status: str = "PENDING",
+    owner_id: Optional[int] = None
 ) -> ScrapingTask:
     """Create a new scraping task."""
     task = ScrapingTask(
         task_id=task_id,
         url=url,
         user_prompt=user_prompt,
-        status=status
+        status=status,
+        owner_id=owner_id
     )
     db.add(task)
     db.commit()
@@ -78,7 +92,7 @@ def find_cached_parser(
     limit: int = 3,
 ) -> List[ParserCache]:
     """Find candidate cached parsers for a domain filtered by keyword overlap.
-
+    
     Returns multiple candidates (ordered best-first) so caller can choose.
     """
     q = (
@@ -269,3 +283,27 @@ def get_all_tasks(db: Session, limit: int = 10) -> List[ScrapingTask]:
         .limit(limit)
         .all()
     )
+
+def create_scheduled_job(
+    db: Session,
+    url: str,
+    prompt: str,
+    cron: str,
+    owner_id: int
+) -> ScheduledJob:
+    job = ScheduledJob(url=url, prompt=prompt, schedule_cron=cron, owner_id=owner_id)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+def get_scheduled_jobs(db: Session, owner_id: int) -> List[ScheduledJob]:
+    return db.query(ScheduledJob).filter(ScheduledJob.owner_id == owner_id).all()
+
+def delete_scheduled_job(db: Session, job_id: int, owner_id: int) -> bool:
+    job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id, ScheduledJob.owner_id == owner_id).first()
+    if job:
+        db.delete(job)
+        db.commit()
+        return True
+    return False

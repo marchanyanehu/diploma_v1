@@ -5,7 +5,7 @@ This module defines the data models used for API endpoints,
 ensuring proper validation and serialization of requests and responses.
 """
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, EmailStr
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from enum import Enum
@@ -30,13 +30,13 @@ class ScrapeRequest(BaseModel):
     
     url: HttpUrl = Field(
         description="The URL to scrape data from",
-    examples=[EXAMPLE_URL]
+        examples=[EXAMPLE_URL]
     )
     prompt: str = Field(
         min_length=5,
         max_length=500,
         description="Natural language description of the data to extract",
-    examples=[EXAMPLE_PROMPT]
+        examples=[EXAMPLE_PROMPT]
     )
     
     model_config = {
@@ -244,3 +244,33 @@ class HealthResponse(BaseModel):
         default=None,
         description="Service uptime information"
     )
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    email: Optional[EmailStr] = None
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: Optional[EmailStr] = None
+    is_active: bool
+
+class ScheduledJobCreate(BaseModel):
+    url: HttpUrl
+    prompt: str = Field(min_length=5)
+    schedule_cron: str = Field(description="Cron expression (e.g. '*/5 * * * *')")
+
+class ScheduledJobResponse(BaseModel):
+    id: int
+    url: HttpUrl
+    prompt: str
+    schedule_cron: str
+    is_active: bool
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
+    created_at: datetime

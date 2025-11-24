@@ -2,7 +2,7 @@
 SQLAlchemy database models for the Intelligent Web Data Aggregator.
 
 This module defines the database schema using SQLAlchemy ORM models.
-These models represent the persistent data structures for tasks and cached parsers.
+These models represent the persistent data structures for tasks, cached parsers, and users.
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
@@ -12,6 +12,26 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from .database import Base
+
+
+class User(Base):
+    """
+    Model for storing user authentication data.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, index=True, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    tasks = relationship("ScrapingTask", back_populates="owner")
+    scheduled_jobs = relationship("ScheduledJob", back_populates="owner")
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username='{self.username}')>"
 
 
 class ScrapingTask(Base):
@@ -66,6 +86,10 @@ class ScrapingTask(Base):
     # Relationships
     used_parser_id = Column(Integer, ForeignKey("parsers_cache.id"), nullable=True)
     used_parser = relationship("ParserCache", back_populates="tasks")
+
+    # Owner
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    owner = relationship("User", back_populates="tasks")
     
     def __repr__(self) -> str:
         return f"<ScrapingTask(id={self.id}, task_id='{self.task_id}', status='{self.status}')>"
@@ -126,3 +150,27 @@ class ParserCache(Base):
     
     def __repr__(self) -> str:
         return f"<ParserCache(id={self.id}, domain='{self.domain}', target='{self.target_data_type}')>"
+
+
+class ScheduledJob(Base):
+    """
+    Model for scheduled scraping tasks.
+    """
+    __tablename__ = "scheduled_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(Text, nullable=False)
+    prompt = Column(Text, nullable=False)
+    schedule_cron = Column(String(100), nullable=False) # e.g. "*/5 * * * *"
+    is_active = Column(Boolean, default=True)
+    
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner = relationship("User", back_populates="scheduled_jobs")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<ScheduledJob(id={self.id}, cron='{self.schedule_cron}')>"

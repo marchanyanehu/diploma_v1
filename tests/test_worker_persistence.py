@@ -1,63 +1,59 @@
 import os
+from unittest.mock import patch, MagicMock
 from sqlalchemy import create_engine
 from services.api import database as db_mod
 from services.api import db_utils
-from services.playwright_worker.tasks import process_request_task
+from services.ai_worker.tasks import process_request_full
 
+# Use a separate test DB for this module
+TEST_DB_URL = "sqlite:///./test_worker_persistence.db"
 
 def setup_module(module):
-    # Rebind engine to SQLite for test isolation (no external postgres dependency)
-    test_url = "sqlite:///./test_worker.db"
-    if os.path.exists("test_worker.db"):
-        os.remove("test_worker.db")
-    engine = create_engine(test_url, connect_args={"check_same_thread": False})
+    if os.path.exists("test_worker_persistence.db"):
+        try:
+            os.remove("test_worker_persistence.db")
+        except:
+            pass
+    engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
     db_mod.engine.dispose()
-    db_mod.engine = engine  # type: ignore[attr-defined]
-    db_mod.SessionLocal.configure(bind=engine)  # type: ignore[attr-defined]
+    db_mod.engine = engine
+    db_mod.SessionLocal.configure(bind=engine)
     db_mod.Base.metadata.create_all(bind=engine)
 
-
-def teardown_module(module):  # pragma: no cover - cleanup best effort
+def teardown_module(module):
     try:
         db_mod.Base.metadata.drop_all(bind=db_mod.engine)
+        if os.path.exists("test_worker_persistence.db"):
+            os.remove("test_worker_persistence.db")
     except Exception:
         pass
 
-
-def test_process_request_task_persists_sources(monkeypatch):
-    os.environ['PLAYWRIGHT_SKIP'] = '1'
-
-    # Create initial task row
+@patch("services.ai_worker.tasks.celery_app.send_task")
+@patch("services.ai_worker.tasks.extract_intent")
+def test_process_request_full_persistence(mock_extract_intent, mock_send_task):
+    # Setup mocks
+    mock_extract_intent.return_value = {"target": "jobs", "keywords": ["python"]}
+    
+    # Create initial task
     db = db_mod.SessionLocal()
-    db_utils.create_scraping_task(db, task_id='t1', url='https://example.com/jobs', user_prompt='хочу линки работ отсюда')
+    t = db_utils.create_scraping_task(db, "task_p1", "http://example.com", "find jobs")
+    db.commit()
     db.close()
-
-    # Monkeypatch LLM to deterministic outputs
-    class DummyLLM:
-        def chat(self, messages, **kwargs):  # noqa: D401
-            # Return minimal valid JSON for regex generation / intent phases
-            content = messages[-1]['content']
-            if 'Produce JSON with keys' in content:
-                return '{"regex": "(Python Developer)", "flags": "i", "extraction_mode": "findall", "explanation": "", "confidence": 0.9}'
-            if 'REFINE' in content:
-                return '{"regex": "(Python Developer)", "flags": "i", "extraction_mode": "findall", "explanation": "", "confidence": 0.9}'
-            # Intent extraction path
-            return '{"target": "job links", "original_input": "хочу линки работ отсюда", "keywords": ["job", "links"], "constraints": [], "output_shape": "list", "confidence": 0.8}'
-
-    monkeypatch.setattr('shared.llm_client.LLMClient.from_env', lambda: DummyLLM())
-
-    # Execute pipeline
-    result = process_request_task('t1', 'https://example.com/jobs', 'хочу линки работ отсюда')
-    assert result['task_id'] == 't1'
-
-    # Validate persistence
-    db2 = db_mod.SessionLocal()
-    stored = db_utils.get_scraping_task(db2, 't1')
-    assert stored is not None
-    assert getattr(stored, 'page_content') is not None and len(getattr(stored, 'page_content')) > 0
-    # network_requests stored (even if empty list from PLAYWRIGHT_SKIP path)
-    assert getattr(stored, 'network_requests') is not None
-    # intent fields should be persisted
-    assert getattr(stored, 'intent_target') is not None
-    assert getattr(stored, 'intent_keywords') is not None
-    db2.close()
+    
+    # Run function
+    result = process_request_full("task_p1", "http://example.com", "find jobs")
+    
+    assert result["status"] == "IN_PROGRESS"
+    assert "Delegated" in result["message"]
+    
+    # Verify DB update
+    db = db_mod.SessionLocal()
+    task = db_utils.get_scraping_task(db, "task_p1")
+    assert task.status == "STARTED" # process_request_full sets it to STARTED before delegating
+    db.close()
+    
+    # Verify delegation
+    mock_send_task.assert_called_once()
+    args = mock_send_task.call_args
+    assert args[0][0] == "scrape.fetch_page"
+    assert args[1]["queue"] == "fetching_queue"

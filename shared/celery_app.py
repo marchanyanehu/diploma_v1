@@ -37,7 +37,9 @@ def _make_celery() -> Celery:
         backend=backend,
         include=[
             # Ensure tasks module is auto-registered when worker starts
-            "services.playwright_worker.tasks",
+            "services.headless_worker.tasks",
+            "services.ai_worker.tasks",
+            "services.scheduler.tasks",
         ],
     )
     app.conf.update(
@@ -49,6 +51,20 @@ def _make_celery() -> Celery:
         task_track_started=True,
         task_time_limit=60 * 15,  # 15 minutes hard limit
         task_soft_time_limit=60 * 10,  # 10 minutes soft limit
+        task_routes={
+            "services.headless_worker.tasks.*": {"queue": "fetching_queue"},
+            "services.ai_worker.tasks.*": {"queue": "ai_queue"},
+            "scrape.fetch_url": {"queue": "fetching_queue"},
+            "scrape.fetch_page": {"queue": "fetching_queue"},
+            "scrape.process_request_full": {"queue": "ai_queue"},
+            "scrape.process_content": {"queue": "ai_queue"},
+        },
+        beat_schedule={
+            "check-every-minute": {
+                "task": "scheduler.check_due_jobs",
+                "schedule": 60.0,
+            },
+        },
     )
     # Optional eager (synchronous) mode for local dev / tests without broker
     if os.getenv("CELERY_EAGER") or os.getenv("CELERY_ALWAYS_EAGER"):

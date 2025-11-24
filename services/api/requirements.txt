@@ -25,11 +25,13 @@ psycopg2-binary>=2.9.9,<3.0.0
 #############################
 celery[redis]>=5.4.0,<6.0.0
 redis>=5.0.4,<6.0.0
+croniter>=2.0.0,<3.0.0 # For scheduler
 
 #############################
 # HTTP Client
 #############################
 httpx>=0.27.0,<1.0.0
+playwright>=1.44.0 # Added for shared code imports
 
 #############################
 # Security / Auth
@@ -59,8 +61,3 @@ ruff>=0.5.0,<0.6.0
 # Monitoring / Logging
 #############################
 structlog>=24.1.0,<25.0.0
-
-#############################
-# Optional: LangChain Google GenAI (commented until explicitly needed)
-# langchain-google-genai>=2.1.5,<3.0.0
-#############################

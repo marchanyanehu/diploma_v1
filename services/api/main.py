@@ -5,19 +5,20 @@ This module initializes the FastAPI application and defines the core API endpoin
 for processing web scraping requests using natural language prompts.
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import uvicorn
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, cast
 from uuid import uuid4
 import logging, os
 
 # Import database components
 from .database import get_db, create_tables
-from .db_models import ScrapingTask, ParserCache
+from .db_models import ScrapingTask, ParserCache, User
 from .models import (
     ScrapeRequest,
     TaskResponse,
@@ -25,11 +26,18 @@ from .models import (
     TaskStatusResponse,
     ScrapeResult,
     ErrorResponse,
+    UserCreate,
+    Token,
+    UserResponse,
+    ScheduledJobCreate,
+    ScheduledJobResponse,
 )
+from typing import Dict, Any, Optional, cast, List
+from . import auth
 from . import db_utils
 from shared.celery_app import celery_app
 try:  # optional import for inline fallback
-    from services.playwright_worker.tasks import process_request_task  # type: ignore
+    from services.headless_worker.tasks import process_request_task  # type: ignore
 except Exception:  # noqa: BLE001
     process_request_task = None  # type: ignore
 
@@ -54,6 +62,10 @@ tags_metadata = [
     {
         "name": "Health",
         "description": "Liveness and readiness probes, including DB connectivity checks.",
+    },
+    {
+        "name": "Auth",
+        "description": "Authentication endpoints (login, register).",
     },
     {
         "name": "API v1",
@@ -132,7 +144,7 @@ async def root() -> Dict[str, Any]:
         "message": "Intelligent Web Data Aggregator API",
         "version": "1.0.0",
         "status": "operational",
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "documentation": "/docs",
         "health_check": "/health"
     }
@@ -148,7 +160,7 @@ async def health_check() -> Dict[str, Any]:
     """
     return {
         "status": "healthy",
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": "api",
         "version": "1.0.0",
         "uptime": "operational"
@@ -177,7 +189,7 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
     return {
         "api_version": "v1",
         "status": "healthy",
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": {
             "status": db_status,
             "tasks_count": task_count,
@@ -190,6 +202,49 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
         }
     }
 
+# --- Auth Endpoints ---
+
+@app.post("/auth/register", response_model=UserResponse, tags=["Auth"])
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db_utils.get_user_by_username(db, username=user.username)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    hashed_password = auth.get_password_hash(user.password)
+    return db_utils.create_user(db=db, username=user.username, password_hash=hashed_password, email=user.email)
+
+@app.post("/auth/token", response_model=Token, tags=["Auth"])
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db_utils.get_user_by_username(db, form_data.username)
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# --- Scheduler Endpoints ---
+
+@app.post("/api/v1/jobs", response_model=ScheduledJobResponse, tags=["Scheduler", "API v1"])
+def create_job(job: ScheduledJobCreate, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    return db_utils.create_scheduled_job(db, str(job.url), job.prompt, job.schedule_cron, current_user.id)
+
+@app.get("/api/v1/jobs", response_model=List[ScheduledJobResponse], tags=["Scheduler", "API v1"])
+def list_jobs(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    return db_utils.get_scheduled_jobs(db, current_user.id)
+
+@app.delete("/api/v1/jobs/{job_id}", tags=["Scheduler", "API v1"])
+def delete_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    success = db_utils.delete_scheduled_job(db, job_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"message": "Job deleted"}
+
+# --- Core API Endpoints ---
 
 @app.post(
     "/api/v1/process",
@@ -228,11 +283,13 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 }
             },
         },
+        401: {"description": "Not authenticated"},
     },
 )
 async def process_request(
     request: ScrapeRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
 ) -> TaskResponse:
     """
     Create a new scraping task for the provided URL and prompt.
@@ -241,7 +298,7 @@ async def process_request(
     a PENDING task and return its identifier so clients can poll status later.
     """
     task_id = str(uuid4())
-    logger.info("api.process_request.received", extra={"task_id": task_id, "url": str(request.url)})
+    logger.info("api.process_request.received", extra={"task_id": task_id, "url": str(request.url), "user": current_user.username})
     try:
         # Best-effort persistence; if DB is unavailable, continue gracefully
         db_utils.create_scraping_task(
@@ -250,6 +307,7 @@ async def process_request(
             url=str(request.url),
             user_prompt=request.prompt,
             status=TaskStatus.PENDING.value,
+            owner_id=current_user.id,
         )
     except Exception as e:
         logger.warning("api.process_request.db_persist_failed", extra={"task_id": task_id, "error": str(e)})
@@ -259,7 +317,7 @@ async def process_request(
         celery_app.send_task(
             "scrape.process_request_full",
             args=[task_id, str(request.url), request.prompt],
-            queue="default",
+            queue="ai_queue", # Updated queue for full process which starts with AI/Analysis or orchestration
         )
         logger.info("api.process_request.enqueued", extra={"task_id": task_id})
     except Exception as e:
@@ -320,9 +378,14 @@ async def process_request(
                 }
             },
         },
+        401: {"description": "Not authenticated"},
     },
 )
-async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskStatusResponse:
+async def get_task_status(
+    task_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user)
+) -> TaskStatusResponse:
     """
     Retrieve the current status for a scraping task by its task_id.
 
@@ -338,6 +401,10 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskSt
 
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Ensure user owns the task (or is admin - simplistic check here)
+    if task.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
     # Map DB status string to API enum
     try:
@@ -442,9 +509,14 @@ async def get_task_status(task_id: str, db: Session = Depends(get_db)) -> TaskSt
                 }
             },
         },
+        401: {"description": "Not authenticated"},
     },
 )
-async def get_task_result(task_id: str, db: Session = Depends(get_db)) -> Any:
+async def get_task_result(
+    task_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user)
+) -> Any:
     """
     Return the final scraping result when the task is SUCCESS. If the task
     is still running, return 202 with current status. If it failed, return 400.
@@ -457,6 +529,9 @@ async def get_task_result(task_id: str, db: Session = Depends(get_db)) -> Any:
 
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+        
+    if task.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
     # Normalize status enum
     try:

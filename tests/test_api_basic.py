@@ -1,9 +1,5 @@
-"""
-Basic API smoke tests to validate Task 101-104 readiness.
-"""
 
 from fastapi.testclient import TestClient
-
 
 def test_root_endpoint(client: TestClient):
     resp = client.get("/")
@@ -12,13 +8,18 @@ def test_root_endpoint(client: TestClient):
     assert data["message"] == "Intelligent Web Data Aggregator API"
     assert data["version"] == "1.0.0"
 
-
 def test_health_endpoint(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "healthy"
 
+def test_api_v1_health(client: TestClient):
+    resp = client.get("/api/v1/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "healthy"
+    assert data["database"]["status"] == "connected"
 
 def test_openapi(client: TestClient):
     # HTML docs

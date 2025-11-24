@@ -66,11 +66,11 @@ services:
     command: ["python", "-m", "uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     restart: unless-stopped
 
-  worker:
+  headless_worker:
     build:
       context: .
-      dockerfile: services/playwright-worker/Dockerfile
-    container_name: diploma_worker
+      dockerfile: services/headless-worker/Dockerfile
+    container_name: diploma_headless_worker
     env_file:
       - .env
     environment:
@@ -89,6 +89,33 @@ services:
       PLAYWRIGHT_RETRY_BACKOFF_MS: ${PLAYWRIGHT_RETRY_BACKOFF_MS:-1000}
       PLAYWRIGHT_LOCALE: ${PLAYWRIGHT_LOCALE:-en-US}
       PLAYWRIGHT_TZ: ${PLAYWRIGHT_TZ:-UTC}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    shm_size: 1gb
+    restart: unless-stopped
+    command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "fetching_queue"]
+
+  ai_worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: diploma_ai_worker
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-diploma_db}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
@@ -101,9 +128,32 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
-    shm_size: 1gb
     restart: unless-stopped
-    command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "default"]
+    command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "ai_queue"]
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: diploma_scheduler
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-diploma_db}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+    command: ["celery", "-A", "shared.celery_app.celery_app", "beat", "--loglevel=info"]
 
 volumes:
   postgres_data:
