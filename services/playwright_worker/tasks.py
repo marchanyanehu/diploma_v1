@@ -690,6 +690,40 @@ def process_request_task(task_id: str, url: str, user_prompt: str) -> Dict[str, 
         db.close()
 
 
+@celery_app.task(name="scrape.process_request_full")
+def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
+    """Celery task wrapper executing the full scraping pipeline.
+
+    Uses eager mode automatically if CELERY_EAGER is set (configured in celery_app).
+    Provides extra logging breadcrumbs for end-to-end traceability.
+    """
+    logger.info("worker.process_request_full.received", extra={"task_id": task_id, "url": url})
+    # Ensure DB row exists (API *should* have created it, but be defensive)
+    db = SessionLocal()
+    try:
+        if not db_utils.get_scraping_task(db, task_id):  # pragma: no cover - defensive
+            try:
+                db_utils.create_scraping_task(db, task_id=task_id, url=url, user_prompt=prompt, status="PENDING")
+            except Exception:
+                pass
+    finally:
+        db.close()
+    # Execute core pipeline
+    try:
+        result = process_request_task(task_id, url, prompt)
+        logger.info("worker.process_request_full.completed", extra={"task_id": task_id, "status": result.get("status")})
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("worker.process_request_full.failed", extra={"task_id": task_id, "error": str(exc)})
+        # Mark FAILED in DB
+        db = SessionLocal()
+        try:
+            db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message=str(exc))
+        finally:
+            db.close()
+        return {"task_id": task_id, "status": "FAILED", "error": str(exc)}
+
+
 @celery_app.task(name="scrape.fetch_url")
 def fetch_url(url: str) -> Dict[str, Any]:
     """Minimal Celery task that accepts a URL and returns a normalized payload.

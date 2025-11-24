@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import os
 from celery import Celery
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_broker_backend() -> tuple[str, str]:
@@ -47,6 +50,11 @@ def _make_celery() -> Celery:
         task_time_limit=60 * 15,  # 15 minutes hard limit
         task_soft_time_limit=60 * 10,  # 10 minutes soft limit
     )
+    # Optional eager (synchronous) mode for local dev / tests without broker
+    if os.getenv("CELERY_EAGER") or os.getenv("CELERY_ALWAYS_EAGER"):
+        app.conf.task_always_eager = True
+        app.conf.task_eager_propagates = True
+        logger.info("Celery running in EAGER (synchronous) mode – tasks execute inline.")
     return app
 
 

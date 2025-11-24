@@ -13,7 +13,7 @@ import uvicorn
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, cast
 from uuid import uuid4
-import logging
+import logging, os
 
 # Import database components
 from .database import get_db, create_tables
@@ -28,9 +28,21 @@ from .models import (
 )
 from . import db_utils
 from shared.celery_app import celery_app
+try:  # optional import for inline fallback
+    from services.playwright_worker.tasks import process_request_task  # type: ignore
+except Exception:  # noqa: BLE001
+    process_request_task = None  # type: ignore
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(os.getenv("API_LOG_FILE", "api_debug.log"), encoding="utf-8")
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
@@ -229,6 +241,7 @@ async def process_request(
     a PENDING task and return its identifier so clients can poll status later.
     """
     task_id = str(uuid4())
+    logger.info("api.process_request.received", extra={"task_id": task_id, "url": str(request.url)})
     try:
         # Best-effort persistence; if DB is unavailable, continue gracefully
         db_utils.create_scraping_task(
@@ -239,25 +252,34 @@ async def process_request(
             status=TaskStatus.PENDING.value,
         )
     except Exception as e:
-        logger.warning(f"DB unavailable or failed to persist task {task_id}: {e}")
+        logger.warning("api.process_request.db_persist_failed", extra={"task_id": task_id, "error": str(e)})
 
     # Enqueue background processing via Celery (non-blocking)
     try:
         celery_app.send_task(
-            "scrape.process_request",
+            "scrape.process_request_full",
             args=[task_id, str(request.url), request.prompt],
             queue="default",
         )
-        logger.info(f"Enqueued Celery task for {task_id}")
+        logger.info("api.process_request.enqueued", extra={"task_id": task_id})
     except Exception as e:
-        # If queuing fails, we still return PENDING so client can retry later
-        logger.error(f"Failed to enqueue Celery task for {task_id}: {e}")
+        logger.error("api.process_request.enqueue_failed", extra={"task_id": task_id, "error": str(e)})
+    # Inline fallback if eager or enqueue failed
+    if (os.getenv("CELERY_EAGER") or os.getenv("CELERY_ALWAYS_EAGER")) and process_request_task is not None:
+        try:
+            logger.info("api.process_request.inline_start", extra={"task_id": task_id})
+            process_request_task(task_id, str(request.url), request.prompt)
+            logger.info("api.process_request.inline_done", extra={"task_id": task_id})
+        except Exception as inline_exc:  # noqa: BLE001
+            logger.exception("api.process_request.inline_failed", extra={"task_id": task_id, "error": str(inline_exc)})
 
-    return TaskResponse(
+    resp = TaskResponse(
         task_id=task_id,
         status=TaskStatus.PENDING,
         message="Task created successfully",
     )
+    logger.info("api.process_request.accepted", extra={"task_id": task_id})
+    return resp
 
 
 @app.get(
