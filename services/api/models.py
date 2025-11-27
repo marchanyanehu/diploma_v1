@@ -79,3 +79,4 @@ class ScheduledJobResponse(BaseModel):
     class Config:
         from_attributes = True
 
+

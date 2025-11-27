@@ -1,171 +1,78 @@
 # Intelligent Web Data Aggregator
 
-**Diploma Project by Yan Marchan, 3rd-year student**
+A microservice-based web scraping system powered by LLMs to intelligently extract structured data from websites using natural language queries.
 
-## 🎯 Project Overview
+## Architecture
 
-An intelligent service that accepts a URL and a natural language prompt (e.g., "I want all the job listings") and automatically extracts the requested data using web scraping and Large Language Models (LLMs). The system uses Playwright to gather page data, and an LLM to analyze the request, find the target data, and generate validated regular expressions to extract it. Successful parsers are cached for future use.
+The system is composed of the following microservices:
 
-## 🛠️ Technology Stack
+1.  **API Service (`api`)**: 
+    -   Entry point for users.
+    -   Handles Authentication (JWT).
+    -   Manages scraping tasks and scheduled jobs.
+    -   Exposes REST endpoints.
+2.  **Scheduler Service (`scheduler`)**:
+    -   Runs periodic checks (Celery Beat) for due scheduled jobs.
+    -   Triggers scraping tasks automatically.
+3.  **Headless Worker (`headless_worker`)**:
+    -   Handles actual web page fetching using Playwright.
+    -   Captures visible text (for AI analysis) and full HTML (for extraction).
+    -   Operates in a stealthy context.
+4.  **AI Worker (`ai_worker`)**:
+    -   **Intent Extraction**: Understands what the user wants (target, keywords).
+    -   **Optimized Pipeline**:
+        1.  Finds *examples* of data in the visible text (token-efficient).
+        2.  Locates candidate snippets in the full HTML.
+        3.  Uses LLM to *disambiguate* and select the best source snippet.
+        4.  Generates a precise RegEx based on the snippet.
+    -   Extracts data using the generated RegEx.
 
-- **Backend:** Python, FastAPI
-- **Web Scraping:** Playwright (async version)
-- **Database:** PostgreSQL
-- **ORM / Migrations:** SQLAlchemy, Alembic
-- **Async Tasks:** Celery with Redis broker
-- **Testing:** Pytest, pytest-cov
-- **Containerization:** Docker, Docker Compose
-- **AI:** Large Language Model APIs (Gemini via Google AI Studio, OpenAI through LiteLLM abstraction)
-- **CI/CD:** GitHub Actions
+## Key Features
 
-## 🏗️ Architecture
+-   **Natural Language Interface**: "Get me all prices from this page."
+-   **Token-Optimized AI**: Minimizes LLM costs by processing text/snippets instead of full HTML.
+-   **Automated Scheduling**: Set up Cron-like schedules for recurring scrapes.
+-   **Robust Fetching**: Uses Playwright to handle dynamic JS-heavy sites.
+-   **Microservices**: Scalable and decoupled architecture.
 
-Microservice-based architecture with the following core services:
-- **API Service** (FastAPI) - Main REST API for user interactions
-- **Playwright Worker** - Celery worker for web scraping using Playwright
-- **PostgreSQL Database** - Data persistence
-- **Redis Broker** - Task queue and caching
+## Setup & Installation
 
-## 🚀 Quick Start
+1.  **Prerequisites**: Docker and Docker Compose.
+2.  **Environment Variables**:
+    -   Copy `.env.example` to `.env`.
+    -   Set your API keys (`GOOGLE_API_KEY` or `OPENAI_API_KEY`).
+    -   Set `SECRET_KEY` for JWT auth.
+3.  **Run**:
+    ```bash
+    docker-compose up --build
+    ```
 
-### Prerequisites
-- Docker and Docker Compose
-- Python 3.11+
-- Git
+## API Documentation
 
-### Local Development Setup
+Once running, visit: `http://localhost:8000/docs`
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd diploma
-   ```
+### Authentication
+-   **Register**: `POST /auth/register`
+-   **Login**: `POST /auth/token` -> returns `access_token`.
+-   Use the token in the `Authorization: Bearer <token>` header for protected endpoints.
 
-2. **Set up environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+### Core Endpoints
+-   **Create Task**: `POST /api/v1/process` (requires Auth)
+-   **Check Status**: `GET /api/v1/status/{task_id}`
+-   **Get Result**: `GET /api/v1/result/{task_id}`
 
-3. **(Optional) Configure LLM provider (Gemini default):**
-   Edit your `.env` and set (Gemini recommended):
-   ```bash
-   LLM_PROVIDER=gemini
-   LLM_MODEL=gemini-2.0-flash
-   GOOGLE_API_KEY=your_gemini_key_here  # or GEMINI_API_KEY
-   ```
-   To use OpenAI instead:
-   ```bash
-   LLM_PROVIDER=openai
-   LLM_MODEL=gpt-4o-mini  # or another available model
-   OPENAI_API_KEY=sk-...
-   ```
+### Scheduling
+-   **Create Job**: `POST /api/v1/jobs`
+-   **List Jobs**: `GET /api/v1/jobs`
+-   **Delete Job**: `DELETE /api/v1/jobs/{job_id}`
 
-4. **Start the services:**
-   ```bash
-   docker-compose up --build
-   ```
+## Development
 
-5. **Access the API:**
-   - API Documentation: http://localhost:8000/docs
-   - API Endpoints: http://localhost:8000/api/v1/
-
-## 📡 API Usage
-
-### Process a URL with Natural Language Prompt
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/process" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "url": "https://example-jobs.com",
-       "prompt": "I want all the job listings with their titles and locations"
-     }'
-```
-
-Response:
-```json
-{
-  "task_id": "uuid-here",
-  "status": "processing"
-}
-```
-
-### Check Task Status
-
-```bash
-curl "http://localhost:8000/api/v1/status/{task_id}"
-```
-
-### Get Results
-
-```bash
-curl "http://localhost:8000/api/v1/result/{task_id}"
-```
-
-## 🧠 How It Works
-
-1. **User Request:** Submit URL + natural language prompt
-2. **Web Scraping:** Playwright captures page content and network requests
-3. **LLM Analysis:** AI analyzes the prompt and identifies target data patterns
-4. **Regex Generation:** LLM generates regular expressions to extract the data
-5. **Validation:** System validates and refines the regex
-6. **Caching:** Successful parsers are cached for future use
-7. **Results:** Extracted data is returned to the user
-
-## 📁 Project Structure
-
-```
-diploma/
-├── services/
-│   ├── api/                 # FastAPI application
-│   └── playwright_worker/   # Celery worker tasks package (import path)
-├── shared/                  # Shared models and utilities
-├── tests/                   # Test suites
-├── migrations/              # Alembic database migrations
-├── docker-compose.yml       # Service orchestration
-├── .env.example            # Environment variables template
-└── README.md               # This file
-```
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
-pytest --cov=. --cov-report=html
-```
-
-## �️ Database Migrations (Alembic)
-
-Alembic is set up under the `migrations/` folder. To create and apply migrations locally:
-
-1. Ensure PostgreSQL is running (via Docker Compose or locally) and `.env` has DB settings.
-2. Run migrations:
-
-```powershell
-# From repo root
-alembic upgrade head
-```
-
-To generate a new migration after model changes:
-
-```powershell
-alembic revision --autogenerate -m "describe change"; alembic upgrade head
-```
-
-## �📚 Development
-
-This project follows modern Python development practices:
-- Type hints throughout the codebase
-- SOLID principles
-- Clean architecture
-- Comprehensive testing
-- Automated CI/CD
-
-## 📄 License
-
-This project is developed as part of a diploma thesis.
-
-## 👨‍💻 Author
-
-**Yan Marchan** - 3rd-year Computer Science Student
+-   **Run Tests**:
+    ```bash
+    docker-compose exec api pytest tests/
+    ```
+-   **Linting**:
+    ```bash
+    ruff check .
+    ```

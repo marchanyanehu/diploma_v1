@@ -1,3 +1,4 @@
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -76,4 +77,3 @@ def test_protected_route_with_token(client):
     )
     assert response.status_code == 202
     assert "task_id" in response.json()
-
