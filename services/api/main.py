@@ -109,7 +109,7 @@ app = FastAPI(
     version="1.0.0",
     contact={
         "name": "Yan Marchan",
-        "email": "yan.marchan@example.com",
+        "email": "dadada.marchan@gmail.com",
     },
     license_info={
         "name": "MIT",
@@ -209,7 +209,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db_utils.get_user_by_username(db, username=user.username)
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
-    hashed_password = auth.get_password_hash(user.password)
+    try:
+        hashed_password = auth.get_password_hash(user.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return db_utils.create_user(db=db, username=user.username, password_hash=hashed_password, email=user.email)
 
 @app.post("/auth/token", response_model=Token, tags=["Auth"])

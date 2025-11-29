@@ -6,7 +6,10 @@ for different deployment environments (development, testing, production).
 """
 
 import os
+from pathlib import Path
 from typing import Optional, List
+
+from dotenv import load_dotenv
 from pydantic import Field, BaseModel
 
 try:  # Attempt to import pydantic_settings (preferred)
@@ -17,6 +20,12 @@ except Exception:  # noqa: BLE001
     BaseForSettings = BaseModel  # type: ignore
     SettingsConfigDict = lambda **_: None  # type: ignore
     _USE_SETTINGS_FALLBACK = True
+
+
+# Attempt to load environment variables from .env (supports both docker and local scripts)
+DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+if DOTENV_PATH.exists():
+    load_dotenv(DOTENV_PATH, override=False)
 
 # Constants
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
@@ -74,12 +83,24 @@ class Settings(BaseForSettings):  # type: ignore[misc]
     # CORS
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
     
+    @staticmethod
+    def _resolve_with_env(value: str, env_key: str) -> str:
+        if value:
+            if "${" in value and "}" in value:
+                fallback = os.getenv(env_key)
+                if fallback:
+                    return fallback
+            return value
+        return os.getenv(env_key, "")
+
     @property
     def database_dsn(self) -> str:
         """Construct database DSN from individual components."""
         if self.database_url:
             return self.database_url
-        return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        user = self._resolve_with_env(self.db_user, "POSTGRES_USER")
+        password = self._resolve_with_env(self.db_password, "POSTGRES_PASSWORD")
+        return f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
     @property
     def cors_origins_list(self) -> List[str]:

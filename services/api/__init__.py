@@ -11,4 +11,4 @@ This package contains the API service implementation including:
 
 __version__ = "1.0.0"
 __author__ = "Yan Marchan"
-__email__ = "yan.marchan@example.com"
+__email__ = "dadada.marchan@gmail.com"

@@ -18,10 +18,20 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
+MAX_BCRYPT_PASSWORD_BYTES = 72
+PASSWORD_BYTES_ERROR = (
+    "Password must be at most 72 bytes when encoded as UTF-8 to work with bcrypt."
+)
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
+def _ensure_password_within_limit(password: str) -> None:
+    if len(password.encode("utf-8")) > MAX_BCRYPT_PASSWORD_BYTES:
+        raise ValueError(PASSWORD_BYTES_ERROR)
+
 def get_password_hash(password: str) -> str:
+    _ensure_password_within_limit(password)
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

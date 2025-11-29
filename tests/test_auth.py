@@ -45,6 +45,15 @@ def test_register_user(client):
     assert data["username"] == "testuser"
     assert "id" in data
 
+def test_register_rejects_long_password(client):
+    long_password = "x" * 100
+    response = client.post(
+        "/auth/register",
+        json={"username": "longpass", "password": long_password},
+    )
+    assert response.status_code == 400
+    assert "72 bytes" in response.json()["detail"]
+
 def test_login_for_access_token(client):
     response = client.post(
         "/auth/token",

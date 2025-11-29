@@ -65,6 +65,7 @@ class LLMClientConfig:
     max_retries: int = 2
     temperature: float = 0.2
     max_tokens: Optional[int] = None
+    log_payloads: bool = False
 
 
 class LLMClient:
@@ -96,6 +97,7 @@ class LLMClient:
         max_tokens_env = os.getenv("LLM_MAX_TOKENS")
         max_tokens = int(max_tokens_env) if max_tokens_env else None
 
+        log_payloads = os.getenv("LLM_LOG_PAYLOADS", "false").lower() in {"1", "true", "yes"}
         cfg = LLMClientConfig(
             provider=provider,
             model=model,
@@ -103,6 +105,7 @@ class LLMClient:
             max_retries=max_retries,
             temperature=temperature,
             max_tokens=max_tokens,
+            log_payloads=log_payloads,
         )
         return cls(cfg)
 
@@ -161,13 +164,24 @@ class LLMClient:
         last_exc: Exception | None = None
         for attempt in range(retry_count + 1):
             try:
+                if self.config.log_payloads:
+                    try:
+                        logger.debug("LLM request payload: %s", messages)
+                    except Exception:
+                        logger.debug("LLM request payload logging skipped (unserializable)")
                 resp = completion(
                     model=self.model_name,
                     messages=messages,
                     stream=False,  # ensure non-streaming response
                     **params,
                 )
-                return self._extract_text_from_response(resp)
+                text = self._extract_text_from_response(resp)
+                if self.config.log_payloads:
+                    try:
+                        logger.debug("LLM response text: %s", text)
+                    except Exception:
+                        logger.debug("LLM response logging skipped (unserializable)")
+                return text
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if attempt >= retry_count:
