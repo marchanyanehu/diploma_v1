@@ -113,25 +113,34 @@ def _disambiguate_candidate(candidates: List[Dict], intent: Dict, llm: LLMClient
     
     return candidates[0]
 
-def _find_examples_via_llm(text: str, target: str, llm: LLMClient) -> List[str]:
-    """Use LLM to find concrete examples of target data in content."""
+def _find_examples_via_llm(text: str, target: str, llm: LLMClient, find_titles_for_urls: bool = False) -> List[str]:
+    """Use LLM to find concrete examples of target data in content.
+    
+    Args:
+        text: The content to search in (usually inner_text)
+        target: The target data type (e.g. "job links", "prices")
+        llm: LLM client
+        find_titles_for_urls: If True, find item titles (e.g. job titles) instead of URLs.
+                              Used when we need to find text anchors to locate URLs in HTML.
+    """
     snippet = text[:32768]
     
     # Detect if target is about URLs/links
     target_lower = target.lower()
     is_url_target = any(word in target_lower for word in ['link', 'url', 'href', 'uri'])
     
-    if is_url_target:
-        # For URL targets, guide LLM to find actual full URLs
+    if find_titles_for_urls or is_url_target:
+        # For URL targets on visible text: find item TITLES (not URLs, which aren't in innerText).
+        # E.g. for "job links", find job titles like "VP Quality", "Software Engineer"
+        # These titles can then be searched in HTML to find the surrounding <a href="...">
+        item_type = "job" if "job" in target_lower else "item"
         prompt = (
-            f"I need to extract '{target}' from the content below.\n"
-            f"Find 3-5 distinct, FULL URLs (starting with http:// or https://) that represent '{target}'.\n"
-            f"Look for URLs in:\n"
-            f"- JSON keys like 'hostedUrl', 'applyUrl', 'url', 'href', 'link', 'pageUrl'\n"
-            f"- HTML href attributes\n"
-            f"- Any URL patterns matching the target description\n\n"
-            f"Return ONLY a JSON object: {{\"examples\": [\"https://...\", \"https://...\"]}}\n"
-            f"If no URLs found, return {{\"examples\": []}}.\n\n"
+            f"I need to extract '{target}' from the page. The visible text is below.\n"
+            f"Find 3-5 distinct {item_type} TITLES or NAMES that appear in this text.\n"
+            f"These should be specific item names, NOT generic phrases like 'Apply' or 'Jobs powered by'.\n"
+            f"Look for things like: job titles, product names, article headlines, etc.\n\n"
+            f"Return ONLY a JSON object: {{\"examples\": [\"Item Title 1\", \"Item Title 2\"]}}\n"
+            f"If none found, return {{\"examples\": []}}.\n\n"
             f"CONTENT:\n{snippet}"
         )
     else:
@@ -156,10 +165,6 @@ def _find_examples_via_llm(text: str, target: str, llm: LLMClient) -> List[str]:
                 if isinstance(v, list):
                     examples = [str(x) for x in v if x]
                     break
-        
-        # For URL targets, filter to only actual URLs
-        if is_url_target:
-            examples = [e for e in examples if e.startswith(('http://', 'https://'))]
         
         logger.info(f"LLM found {len(examples)} examples for '{target}': {examples[:3]}")
         return examples
@@ -235,14 +240,25 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         domain = urlparse(url).netloc
         keywords = intent.get("keywords", [])
         
+        # Determine if target is URL-based (links, urls, hrefs)
+        target = intent.get("target", "") or ""
+        target_lower = target.lower()
+        is_url_target = any(word in target_lower for word in ['link', 'url', 'href', 'uri'])
+        
+        # Prepare content sources:
+        # - text_content: for finding examples (visible text like job titles)
+        # - html_search_content: for regex matching (contains hrefs for URL targets)
+        text_content = inner_text if len(inner_text) < 1000000 else inner_text[:1000000]
+        html_search_content = html_content if len(html_content) < 1000000 else html_content[:1000000] if html_content else text_content
+        
+        # For URL targets, we'll search in HTML; for text targets, in inner_text
+        search_content = html_search_content if is_url_target else text_content
+        
         # Check for cached parser
         parsers = db_utils.find_cached_parser(db, domain, keywords=keywords)
         used_parser = None
         reuse_matches = []
         used_cached = False
-        
-        # Use the raw content for regex matching (works for both JSON and HTML)
-        search_content = inner_text if len(inner_text) < 1000000 else inner_text[:1000000]
         
         for p in parsers:
             patt, fl = _decompose_stored_regex(cast(str, p.generated_regex))
@@ -260,14 +276,23 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         else:
             # UNIVERSAL REGEX PIPELINE
             
-            # Step 1: Find Examples in content
-            _log_event(task_id, "step_1_find_examples")
-            examples_found = find_target_examples(search_content, keywords=keywords, target=intent.get("target"), max_examples=5)
-            example_texts = [e["text"] for e in examples_found]
+            # Step 1: Find Examples from inner_text (visible text like job titles)
+            # For URL targets, use LLM directly since keyword matching won't find URLs in text
+            _log_event(task_id, "step_1_find_examples", is_url_target=is_url_target)
+            example_texts = []
+            
+            if is_url_target:
+                # For URL targets, keyword-based finder won't work well (e.g. "VP Quality" 
+                # doesn't contain "job"). Use LLM to find relevant text like job titles.
+                _log_event(task_id, "step_1_llm_for_url_target")
+                example_texts = _find_examples_via_llm(text_content, intent.get("target", "") or "target data", llm)
+            else:
+                examples_found = find_target_examples(text_content, keywords=keywords, target=intent.get("target"), max_examples=5)
+                example_texts = [e["text"] for e in examples_found]
             
             if not example_texts:
                 _log_event(task_id, "step_1_fallback_llm_examples")
-                example_texts = _find_examples_via_llm(search_content, intent.get("target", "") or "target data", llm)
+                example_texts = _find_examples_via_llm(text_content, intent.get("target", "") or "target data", llm)
 
             if not example_texts:
                 example_texts = keywords[:3]
@@ -275,7 +300,9 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             _log_event(task_id, "examples_found", count=len(example_texts), samples=example_texts[:3])
             
             # Step 2: Find candidate snippets containing examples
-            _log_event(task_id, "step_2_find_candidates", example_count=len(example_texts))
+            # For URL targets: search in HTML to find the surrounding markup with hrefs
+            # For text targets: search in inner_text
+            _log_event(task_id, "step_2_find_candidates", example_count=len(example_texts), using_html=is_url_target)
             candidates = _find_candidates_in_content(search_content, example_texts)
             
             # Step 3: Disambiguate best snippet
@@ -300,10 +327,26 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                     # Include more content to ensure examples are present
                     snippet_to_use = search_content[:32000]
 
+            # For URL targets: extract actual URLs from HTML near the text anchors
+            # The regex validation needs URL examples to match, not text anchors
+            regex_examples = example_texts
+            if is_url_target and best_snippet:
+                import re as _re
+                # Find URLs in the snippet (from href attributes)
+                url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
+                found_urls = _re.findall(url_pattern, best_snippet)
+                if found_urls:
+                    # Use found URLs as examples for regex generation
+                    regex_examples = list(dict.fromkeys(found_urls))[:5]  # dedupe, limit to 5
+                    _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
+                regex_target_desc = f"{target} - extract href URL values from <a> tags"
+            else:
+                regex_target_desc = intent.get("target") or "target data"
+
             gen = regex_generation.iterative_regex_generation(
                 source=search_content,
-                examples=example_texts,
-                target_desc=intent.get("target") or "target data",
+                examples=regex_examples,
+                target_desc=regex_target_desc,
                 llm=llm,
                 max_iterations=3,
                 snippet=snippet_to_use 
