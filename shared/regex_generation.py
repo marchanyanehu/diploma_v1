@@ -121,7 +121,7 @@ def build_generation_messages(snippet: str, examples: Sequence[str], *, target_d
     user = (
         f"TARGET: {target_desc}\n\n"
         f"EXAMPLES (the regex MUST match each):\n{_examples_block(examples)}\n\n"
-        f"SNIPPET (context only, do NOT overfit to unrelated text):\n<<<SNIPPET_START>>>\n{snippet[:4000]}\n<<<SNIPPET_END>>>\n\n"
+        f"SNIPPET (context only, do NOT overfit to unrelated text):\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
         f"Produce JSON with keys: regex, flags, extraction_mode, explanation, confidence.\n\n{_GENERATION_RULES}"
     )
     return [
@@ -129,7 +129,6 @@ def build_generation_messages(snippet: str, examples: Sequence[str], *, target_d
         {"role": "user", "content": user},
         {"role": "assistant", "content": _JSON_EXAMPLE},
     ]
-
 
 def build_refinement_messages(
     previous_json: Dict[str, Any],
@@ -150,7 +149,7 @@ def build_refinement_messages(
         f"REFINE the previous regex so all examples match and issues are resolved.\n"
         f"TARGET: {target_desc}\n\n"
         f"EXAMPLES:\n{_examples_block(examples)}\n\n"
-        f"SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:4000]}\n<<<SNIPPET_END>>>\n\n"
+        f"SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
         f"PREVIOUS_REGEX_JSON: {prev}\n"
         f"VALIDATION_FAILURES: {fail}\n\n"
         "Return ONLY corrected JSON (same schema). Keep improvements minimal."
@@ -373,7 +372,8 @@ def iterative_regex_generation(
     """
     if not examples:
         return {"success": False, "error": "no examples"}
-    snippet_used = snippet if snippet is not None else source[:4000]
+    # Ensure snippet_used is robust for JSON/large content
+    snippet_used = snippet if snippet is not None and len(snippet) > 100 else source[:32000]
     attempts: List[Dict[str, Any]] = []
 
     gen_messages = build_generation_messages(snippet_used, examples, target_desc=target_desc)
