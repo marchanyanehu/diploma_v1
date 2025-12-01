@@ -64,47 +64,71 @@ __all__ = [
 
 # ---------------------------- Prompt Engineering --------------------------- #
 
-_SYSTEM_INSTRUCTION = (
-    "You are a rigorous REGEX GENERATOR. You output ONLY strict JSON following the schema. "
-    "Never include commentary, code fences, or additional text. Focus on precision and non-greedy, efficient patterns."
-)
+_SYSTEM_INSTRUCTION = """You are a specialized AI assistant that generates **generalized, production-grade regular expressions** from provided JSON or HTML snippets.
 
-_EXTRA_DOMAIN_RULES = (
-    "ADDITIONAL DOMAIN RULES (HTML & JSON):\n"
-    "- Assume DOTALL ('.' matches newlines). Only add 's' flag if runtime requires; design pattern as if enabled.\n"
-    "- NEVER wrap output in delimiters (no /regex/). Output raw pattern only.\n"
-    "- ALWAYS escape literal curly braces when matching them: \\{ and \\}. Do NOT escape braces used for quantifiers.\n"
-    "- HTML: Avoid binding to tag names (div, h1, a). Prefer stable class/id substrings.\n"
-    "  * When anchoring on class attributes, omit volatile style-related fragments (e.g. size, animation tokens).\n"
-    "  * After an anchored attribute, allow other attributes with [^>]*?\n"
-    "  * Whitespace trimming: use \\s*+ (possessive if supported) or \\s*? lazily around optional spaces.\n"
-    "  * For nested inline tags within the capture, skip them using (?:<[^>]+>)* non-greedily.\n"
-    "  * To extract attribute values (e.g. href), bind a unique attribute sequence on the SAME tag.\n"
-    "- JSON: Key matching should tightly bind the key token with surrounding punctuation and quotes.\n"
-    "  * For potentially quoted content with internal quotes, use (.*?) non-greedy until the next unescaped quote.\n"
-    "  * For nested objects, traverse minimally with [^}]*? or .*? depending on depth risk.\n"
-    "  * Optional single value or list: (?:\\[\\s*)? before the first captured element.\n"
-    "- Prefer a single capturing group that returns JUST the target value (no extra label text).\n"
-)
+## Global Assumptions
+* **DOTALL is enabled** (`.` matches newlines). Do **not** add inline `(?s)`.
+* **Never wrap** the regex in language/framework scopes or delimiters (no `/.../`, no flags outside the pattern).
+* **Always escape curly braces** as `\\{` and `\\}` inside the pattern when matching literal braces.
 
-_GENERATION_RULES = (
-    "BASE RULES:\n"
-    "1. Output ONLY JSON (no backticks).\n"
-    "2. Use non-greedy quantifiers where possible. Avoid catastrophic backtracking ((.+)+, (.*)+, nested stars).\n"
-    "3. Prefer explicit character classes over '.*' when context allows.\n"
-    "4. Do NOT capture leading/trailing whitespace unless meaningful; trim with \\s*+ or \\s*?.\n"
-    "5. Provide either: (a) a single capturing group containing the desired value (extraction_mode='group'), or (b) full-match items (extraction_mode='findall').\n"
-    "6. Generalize variable segments with classes (\\d+, [A-Za-z]{2,}, [0-9A-F]{8}, etc.).\n"
-    "7. Keep pattern length < 500 chars.\n"
-    "8. Escape literal special characters (., +, ?, (, ), [, ], {, }, |, ^, $, /) when they must be matched verbatim.\n"
-    "9. Flags: 'i' for case-insensitive only if examples differ by case; 'm' only if ^/$ anchors per line; 's' if required by engine.\n"
-    "10. explanation <= 240 chars, concise.\n\n"
-    + _EXTRA_DOMAIN_RULES
-)
+## Generalization Rules (Must Follow)
+Your regexes **must be reusable across pages/jobs with similar structure**. Do **not** bake in page-specific details.
+
+**Avoid page-specific anchors**
+* Do not use full URLs, numeric IDs that look auto-generated, GUIDs, timestamps, build hashes, or long opaque tokens.
+* Do not bind to exact tag names (`div`, `h1`, `a`) if an attribute-level anchor exists. Prefer stable attributes.
+* Do not rely on complete class lists; **bind to the stable, structural subset** of class names and allow variance around it.
+
+**Prefer structural, tolerant anchors**
+* Use stable `class`/`id` fragments; when binding by class, **omit styling/size/animation tokens** and allow other attributes via `[^>]*?`.
+* Allow optional whitespace with lazy spacing (`\\s*?` or `\\s*`) near boundaries.
+* When nested markup may appear, allow it with non-capturing skips like `(?:<[^>]+>)*`.
+* Use **lazy quantifiers** and **tempered patterns** to avoid runaway greed.
+
+**Capture only what you need**
+* Use a **single capturing group** for the target value. Use `(?: ... )` for all non-target grouping.
+* Trim leading/trailing whitespace in the capture by placing `\\s*` **outside** the group when appropriate.
+
+**JSON-specific guidance**
+* Keys: match with tolerance around separators: `"key"\\s*:\\s*"([^"]+)"`.
+* For URL values: `"hostedUrl"\\s*:\\s*"(https?://[^"]+)"` or `"applyUrl"\\s*:\\s*"(https?://[^"]+)"`.
+* String values: capture with `([^"]+)` for simple strings, `(https?://[^"]+)` for URLs.
+* Arrays: `"items"\\s*:\\s*\\[` then iterate with `"url"\\s*:\\s*"([^"]+)"`.
+
+**HTML-specific guidance**
+* Anchor on **stable attribute fragments** (`class`, `id`) not tag names; allow attribute variability via `[^>]*?`.
+* For href extraction: `href="(https?://[^"]+)"` with appropriate context anchors.
+* Text extraction: anchor → allow attributes → optional whitespace → **capture inner text non-greedily** → stop at next tag.
+
+## Safety & Performance
+* Keep patterns as **specific as needed but no more**: prefer character classes/tempered tokens to `.*?` when a safe boundary exists.
+* Avoid catastrophic backtracking: prefer `[^"]*` over `.*?` for JSON string capture.
+
+You output ONLY strict JSON following the schema. Never include commentary, code fences, or additional text."""
+
+_GENERATION_RULES = """## Output Format (Strict)
+Output ONLY a JSON object with these keys:
+- "regex": the raw pattern (no delimiters, properly escaped for JSON)
+- "flags": combination of i,m,s (usually empty or "s")
+- "extraction_mode": "group" (single capturing group) or "findall"
+- "explanation": brief reason (<= 240 chars)
+- "confidence": 0..1 self-assessed confidence
+
+## Rules
+1. Output ONLY JSON (no backticks, no prose).
+2. Use non-greedy quantifiers. Avoid catastrophic backtracking.
+3. Prefer explicit character classes over '.*' when possible.
+4. Single capturing group for the target value only.
+5. Generalize variable segments (use \\d+, [A-Za-z]+, etc. not literals).
+6. Keep pattern length < 500 chars.
+7. Escape literal special chars: . + ? ( ) [ ] { } | ^ $ /
+8. Do NOT include page-specific IDs, GUIDs, timestamps, or full URLs in pattern."""
 
 _JSON_EXAMPLE = (
-    '{"regex": "Job\\s+Title: (?:[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)", "flags": "i", '
-    '"extraction_mode": "findall", "explanation": "Capture job titles after the label", "confidence": 0.82}'
+    '{"regex": "\\"hostedUrl\\"\\\\s*:\\\\s*\\"(https?://[^\\"]*)\\"",'
+    ' "flags": "s", "extraction_mode": "group",'
+    ' "explanation": "Extract hostedUrl URL value from JSON using key anchor",'
+    ' "confidence": 0.9}'
 )
 
 
@@ -120,14 +144,14 @@ def build_generation_messages(snippet: str, examples: Sequence[str], *, target_d
     """
     user = (
         f"TARGET: {target_desc}\n\n"
-        f"EXAMPLES (the regex MUST match each):\n{_examples_block(examples)}\n\n"
-        f"SNIPPET (context only, do NOT overfit to unrelated text):\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
-        f"Produce JSON with keys: regex, flags, extraction_mode, explanation, confidence.\n\n{_GENERATION_RULES}"
+        f"EXAMPLES (the regex MUST match each of these exactly):\n{_examples_block(examples)}\n\n"
+        f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
+        f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+        f"{_GENERATION_RULES}"
     )
     return [
         {"role": "system", "content": _SYSTEM_INSTRUCTION},
         {"role": "user", "content": user},
-        {"role": "assistant", "content": _JSON_EXAMPLE},
     ]
 
 def build_refinement_messages(
@@ -145,19 +169,24 @@ def build_refinement_messages(
     """
     prev = json.dumps(previous_json, ensure_ascii=False)
     fail = json.dumps(failures, ensure_ascii=False)
+    
+    missing_examples = failures.get("missing_examples", [])
+    issues = failures.get("issues", [])
+    
     user = (
-        f"REFINE the previous regex so all examples match and issues are resolved.\n"
+        f"REFINE the previous regex. The pattern failed validation.\n\n"
         f"TARGET: {target_desc}\n\n"
-        f"EXAMPLES:\n{_examples_block(examples)}\n\n"
-        f"SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
-        f"PREVIOUS_REGEX_JSON: {prev}\n"
-        f"VALIDATION_FAILURES: {fail}\n\n"
-        "Return ONLY corrected JSON (same schema). Keep improvements minimal."
+        f"EXAMPLES (the regex MUST match each):\n{_examples_block(examples)}\n\n"
+        f"CONTENT SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+        f"PREVIOUS ATTEMPT: {prev}\n\n"
+        f"ISSUES: {', '.join(issues) if issues else 'Pattern did not match examples'}\n"
+        f"MISSING EXAMPLES: {missing_examples[:5] if missing_examples else 'None'}\n\n"
+        f"Fix the regex to match ALL examples. Output ONLY corrected JSON.\n\n"
+        f"{_GENERATION_RULES}"
     )
     return [
-        {"role": "system", "content": _SYSTEM_INSTRUCTION + " Focus now on *refinement* only."},
+        {"role": "system", "content": _SYSTEM_INSTRUCTION},
         {"role": "user", "content": user},
-        {"role": "assistant", "content": _JSON_EXAMPLE},
     ]
 
 
@@ -380,7 +409,10 @@ def iterative_regex_generation(
     raw = llm.chat(gen_messages, temperature=0.2)
     parsed = _extract_json(raw)
     pattern = str(parsed.get("regex", ""))
-    flags = str(parsed.get("flags", ""))
+    # Default to DOTALL flag if not specified
+    flags = str(parsed.get("flags", "s"))
+    if "s" not in flags.lower():
+        flags = flags + "s"
     val = validate_regex(pattern, source, examples, flags=flags)
     attempts.append({"stage": "initial", "raw": raw, "parsed": parsed, "validation": val})
     if val.get("success"):
