@@ -357,20 +357,34 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 flags = gen.get("final_flags", "s")  # Default to DOTALL
                 matches = _apply_regex_matches(pattern, flags, search_content)
                 if matches:
-                    extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in matches]
-                    db_utils.record_new_parser(
-                        db,
-                        task_id=task_id,
-                        url=url,
-                        intent=intent,
-                        pattern=pattern,
-                        flags=flags,
-                        matches_count=len(matches),
-                        source_type="CONTENT",
-                        sample_input=best_snippet[:2000],
-                        sample_output=[{"text": m} for m in matches[:5]]
-                    )
-                    _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(matches))
+                    # Deduplicate matches while preserving order
+                    seen = set()
+                    unique_matches = []
+                    for m in matches:
+                        if m not in seen:
+                            seen.add(m)
+                            unique_matches.append(m)
+                    
+                    # For URL targets, filter out the base page URL (we want specific item URLs)
+                    if is_url_target:
+                        base_url = url.rstrip('/')
+                        unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
+                    
+                    if unique_matches:
+                        extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
+                        db_utils.record_new_parser(
+                            db,
+                            task_id=task_id,
+                            url=url,
+                            intent=intent,
+                            pattern=pattern,
+                            flags=flags,
+                            matches_count=len(unique_matches),
+                            source_type="CONTENT",
+                            sample_input=best_snippet[:2000],
+                            sample_output=[{"text": m} for m in unique_matches[:5]]
+                        )
+                        _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
             else:
                 _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
 
