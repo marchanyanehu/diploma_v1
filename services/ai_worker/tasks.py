@@ -174,6 +174,47 @@ def _find_examples_via_llm(text: str, target: str, llm: LLMClient, find_titles_f
         return []
 
 
+def _find_structured_examples_via_llm(text: str, target: str, keywords: List[str], llm: LLMClient) -> List[str]:
+    """Find complete structured record examples for multi-field extraction.
+    
+    For requests like "country names with capital, population, area", this finds
+    complete record blocks (e.g., "Zimbabwe\nCapital: Harare\nPopulation: 11651858\nArea: 390580")
+    instead of individual lines.
+    """
+    snippet = text[:32768]
+    fields_str = ", ".join(keywords[:5])
+    
+    prompt = (
+        f"I need to extract structured records containing: {fields_str}\n"
+        f"Find 2-3 COMPLETE example records from the text below.\n"
+        f"Each record should include ALL the fields mentioned above.\n"
+        f"Return the EXACT text as it appears, preserving line breaks within each record.\n\n"
+        f"Return ONLY a JSON object: {{\"examples\": [\"record1 text\", \"record2 text\"]}}\n"
+        f"If no complete records found, return {{\"examples\": []}}.\n\n"
+        f"CONTENT:\n{snippet}"
+    )
+    
+    try:
+        resp = llm.generate_text(prompt, extra_params={"response_format": {"type": "json_object"}})
+        data = _json.loads(resp)
+        
+        examples = []
+        if isinstance(data, list):
+            examples = [str(x) for x in data if x]
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, list):
+                    examples = [str(x) for x in v if x]
+                    break
+        
+        logger.info(f"LLM found {len(examples)} structured examples for '{target}': {[e[:50] for e in examples[:2]]}")
+        return examples
+        
+    except Exception as e:
+        logger.warning(f"Structured example finding via LLM failed: {e}")
+        return []
+
+
 @celery_app.task(name="scrape.process_request_full")
 def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
     """Entry point: Analyze intent and decide next steps."""
@@ -277,8 +318,11 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             # UNIVERSAL REGEX PIPELINE
             
             # Step 1: Find Examples from inner_text (visible text like job titles)
-            # For URL targets, use LLM directly since keyword matching won't find URLs in text
-            _log_event(task_id, "step_1_find_examples", is_url_target=is_url_target)
+            # Detect if this is multi-field structured data (e.g., country + capital + population)
+            # Multi-field requests have 3+ distinct field-type keywords
+            is_multi_field = len(keywords) >= 3
+            
+            _log_event(task_id, "step_1_find_examples", is_url_target=is_url_target, is_multi_field=is_multi_field)
             example_texts = []
             
             if is_url_target:
@@ -286,6 +330,11 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 # doesn't contain "job"). Use LLM to find relevant text like job titles.
                 _log_event(task_id, "step_1_llm_for_url_target")
                 example_texts = _find_examples_via_llm(text_content, intent.get("target", "") or "target data", llm)
+            elif is_multi_field:
+                # For multi-field extraction (structured data), use LLM to find complete records
+                # Keyword matching only finds single lines, but we need full record blocks
+                _log_event(task_id, "step_1_llm_for_multi_field")
+                example_texts = _find_structured_examples_via_llm(text_content, target, keywords, llm)
             else:
                 examples_found = find_target_examples(text_content, keywords=keywords, target=intent.get("target"), max_examples=5)
                 example_texts = [e["text"] for e in examples_found]
@@ -316,7 +365,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 snip = extract_snippet_around_example(search_content, example_texts[0] if example_texts else "", max_chars=4000)
                 best_snippet = cast(str, snip.get("snippet", ""))
             
-            # Step 4: Generate Regex using enhanced prompt
+            # Step 4: Generate Regex
             _log_event(task_id, "step_4_generate_regex")
             
             # Use a larger snippet for regex generation to ensure examples are visible
@@ -324,69 +373,133 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             if len(search_content) > 10000 and len(best_snippet) < 4000:
                 missing_count = sum(1 for ex in example_texts if ex not in best_snippet)
                 if missing_count > 0:
-                    # Include more content to ensure examples are present
                     snippet_to_use = search_content[:32000]
 
-            # For URL targets: extract actual URLs from HTML near the text anchors
-            # The regex validation needs URL examples to match, not text anchors
-            regex_examples = example_texts
-            if is_url_target and best_snippet:
-                import re as _re
-                # Find URLs in the snippet (from href attributes)
-                url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
-                found_urls = _re.findall(url_pattern, best_snippet)
-                if found_urls:
-                    # Use found URLs as examples for regex generation
-                    regex_examples = list(dict.fromkeys(found_urls))[:5]  # dedupe, limit to 5
-                    _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
-                regex_target_desc = f"{target} - extract href URL values from <a> tags"
+            if is_multi_field:
+                # MULTI-FIELD EXTRACTION: Generate separate regex for each field
+                _log_event(task_id, "multi_field_extraction", fields=keywords)
+                field_results = {}
+                
+                for field in keywords:
+                    # Find field-specific examples from the structured examples
+                    field_examples = []
+                    field_lower = field.lower()
+                    for ex in example_texts:
+                        # Extract the line containing this field from the structured example
+                        for line in ex.split('\n'):
+                            if field_lower in line.lower():
+                                # Get just the value part after the colon if present
+                                if ':' in line:
+                                    value = line.split(':', 1)[1].strip()
+                                    if value:
+                                        field_examples.append(value)
+                                else:
+                                    field_examples.append(line.strip())
+                                break
+                    
+                    if not field_examples:
+                        continue
+                    
+                    # Dedupe examples
+                    field_examples = list(dict.fromkeys(field_examples))[:3]
+                    _log_event(task_id, "field_examples", field=field, examples=field_examples)
+                    
+                    # Generate regex for this field
+                    gen = regex_generation.iterative_regex_generation(
+                        source=search_content,
+                        examples=field_examples,
+                        target_desc=f"{field} values",
+                        llm=llm,
+                        max_iterations=2,
+                        snippet=snippet_to_use
+                    )
+                    
+                    if gen.get("success"):
+                        pattern = gen.get("final_pattern")
+                        flags = gen.get("final_flags", "s")
+                        matches = _apply_regex_matches(pattern, flags, search_content)
+                        if matches:
+                            # Deduplicate
+                            unique = list(dict.fromkeys(matches))
+                            field_results[field] = unique
+                            _log_event(task_id, "field_regex_success", field=field, match_count=len(unique))
+                
+                # Combine field results into extracted_data
+                if field_results:
+                    # Create records by zipping field results (assumes same order)
+                    max_len = max(len(v) for v in field_results.values())
+                    for i in range(max_len):
+                        record = {}
+                        for field, values in field_results.items():
+                            if i < len(values):
+                                record[field] = values[i]
+                        if record:
+                            # Create text representation for API compatibility
+                            text_parts = [f"{k}: {v}" for k, v in record.items()]
+                            text_repr = " | ".join(text_parts)
+                            extracted_data.append({
+                                "text": text_repr,
+                                "fields": record, 
+                                "source": "multi_field_regex", 
+                                "confidence": 0.85
+                            })
+                    _log_event(task_id, "multi_field_success", record_count=len(extracted_data))
             else:
-                regex_target_desc = intent.get("target") or "target data"
+                # SINGLE-FIELD EXTRACTION
+                regex_examples = example_texts
+                if is_url_target and best_snippet:
+                    import re as _re
+                    url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
+                    found_urls = _re.findall(url_pattern, best_snippet)
+                    if found_urls:
+                        regex_examples = list(dict.fromkeys(found_urls))[:5]
+                        _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
+                    regex_target_desc = f"{target} - extract href URL values from <a> tags"
+                else:
+                    regex_target_desc = intent.get("target") or "target data"
 
-            gen = regex_generation.iterative_regex_generation(
-                source=search_content,
-                examples=regex_examples,
-                target_desc=regex_target_desc,
-                llm=llm,
-                max_iterations=3,
-                snippet=snippet_to_use 
-            )
-            
-            if gen.get("success"):
-                pattern = gen.get("final_pattern")
-                flags = gen.get("final_flags", "s")  # Default to DOTALL
-                matches = _apply_regex_matches(pattern, flags, search_content)
-                if matches:
-                    # Deduplicate matches while preserving order
-                    seen = set()
-                    unique_matches = []
-                    for m in matches:
-                        if m not in seen:
-                            seen.add(m)
-                            unique_matches.append(m)
-                    
-                    # For URL targets, filter out the base page URL (we want specific item URLs)
-                    if is_url_target:
-                        base_url = url.rstrip('/')
-                        unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
-                    
-                    if unique_matches:
-                        extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
-                        db_utils.record_new_parser(
-                            db,
-                            task_id=task_id,
-                            url=url,
-                            intent=intent,
-                            pattern=pattern,
-                            flags=flags,
-                            matches_count=len(unique_matches),
-                            source_type="CONTENT",
-                            sample_input=best_snippet[:2000],
-                            sample_output=[{"text": m} for m in unique_matches[:5]]
-                        )
-                        _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
-            else:
-                _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
+                gen = regex_generation.iterative_regex_generation(
+                    source=search_content,
+                    examples=regex_examples,
+                    target_desc=regex_target_desc,
+                    llm=llm,
+                    max_iterations=3,
+                    snippet=snippet_to_use 
+                )
+                
+                if gen.get("success"):
+                    pattern = gen.get("final_pattern")
+                    flags = gen.get("final_flags", "s")
+                    matches = _apply_regex_matches(pattern, flags, search_content)
+                    if matches:
+                        seen = set()
+                        unique_matches = []
+                        for m in matches:
+                            if m not in seen:
+                                seen.add(m)
+                                unique_matches.append(m)
+                        
+                        if is_url_target:
+                            base_url = url.rstrip('/')
+                            unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
+                        
+                        if unique_matches:
+                            extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
+                            db_utils.record_new_parser(
+                                db,
+                                task_id=task_id,
+                                url=url,
+                                intent=intent,
+                                pattern=pattern,
+                                flags=flags,
+                                matches_count=len(unique_matches),
+                                source_type="CONTENT",
+                                sample_input=best_snippet[:2000],
+                                sample_output=[{"text": m} for m in unique_matches[:5]]
+                            )
+                            _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
+                else:
+                    _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
 
         # Persist Results
         if extracted_data:
