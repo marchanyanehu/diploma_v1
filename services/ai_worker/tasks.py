@@ -59,22 +59,31 @@ def _extract_snippet(content: str, idx: int, example_len: int, context: int = 30
     return content[s_start:s_end]
 
 
-def _find_candidates_in_content(content: str, examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
-    """Find unique snippets in content that contain the examples."""
+def _find_text_in_html(html_content: str, text_examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
+    """Step 3: Find text examples in raw HTML (no LLM, pure string search).
+    
+    Args:
+        html_content: The raw HTML content to search in
+        text_examples: Text examples found via LLM from inner_text
+        max_candidates: Maximum number of candidate snippets to return
+        
+    Returns:
+        List of candidate dicts with 'example_match', 'snippet', 'offset'
+    """
     candidates = []
     seen_snippets: set = set()
     
-    for ex in examples:
+    for ex in text_examples:
         if not ex or len(ex) < 3:
             continue
         
         start = 0
         while len(candidates) <= max_candidates:
-            idx = content.find(ex, start)
+            idx = html_content.find(ex, start)
             if idx == -1:
                 break
             
-            snippet = _extract_snippet(content, idx, len(ex))
+            snippet = _extract_snippet(html_content, idx, len(ex))
             if snippet not in seen_snippets:
                 candidates.append({"example_match": ex, "snippet": snippet, "offset": idx})
                 seen_snippets.add(snippet)
@@ -88,8 +97,17 @@ def _find_candidates_in_content(content: str, examples: List[str], max_candidate
             
     return candidates
 
-def _disambiguate_candidate(candidates: List[Dict], intent: Dict, llm: LLMClient) -> Dict[str, Any]:
-    """Ask LLM which candidate snippet looks like the best source."""
+def _select_best_candidate_via_llm(candidates: List[Dict], intent: Dict, llm: LLMClient) -> Dict[str, Any]:
+    """Step 4: Present candidate snippets to LLM and select the best one.
+    
+    Args:
+        candidates: List of candidate snippets found in HTML
+        intent: The extraction intent with target and keywords
+        llm: LLM client for decision making
+        
+    Returns:
+        The best candidate dict, or first candidate as fallback
+    """
     if not candidates:
         return {}
     
@@ -100,7 +118,7 @@ def _disambiguate_candidate(candidates: List[Dict], intent: Dict, llm: LLMClient
     prompt = (
         f"TARGET: {intent.get('target')}\n"
         f"KEYWORDS: {intent.get('keywords')}\n"
-        f"We found these text fragments. Which one seems to be part of the main data area we want to extract?\n"
+        f"We found these HTML snippets containing the target data. Which one is the best source for regex extraction?\n"
         f"CANDIDATES:\n" + "\n".join(options[:5]) + "\n\n"
         "Return JSON: {'best_option_index': int, 'reason': str}"
     )
@@ -116,45 +134,28 @@ def _disambiguate_candidate(candidates: List[Dict], intent: Dict, llm: LLMClient
     
     return candidates[0]
 
-def _find_examples_via_llm(text: str, target: str, llm: LLMClient, find_titles_for_urls: bool = False) -> List[str]:
-    """Use LLM to find concrete examples of target data in content.
+def _find_matching_text_via_llm(inner_text: str, target: str, llm: LLMClient) -> List[str]:
+    """Step 2: Use LLM to find raw text matching the keyword in inner_text.
     
     Args:
-        text: The content to search in (usually inner_text)
+        inner_text: The inner text content (not HTML)
         target: The target data type (e.g. "job links", "prices")
         llm: LLM client
-        find_titles_for_urls: If True, find item titles (e.g. job titles) instead of URLs.
-                              Used when we need to find text anchors to locate URLs in HTML.
+        
+    Returns:
+        List of exact text strings found that match the target
     """
-    snippet = text[:32768]
+    snippet = inner_text[:32768]
     
-    # Detect if target is about URLs/links
-    target_lower = target.lower()
-    is_url_target = any(word in target_lower for word in ['link', 'url', 'href', 'uri'])
-    
-    if find_titles_for_urls or is_url_target:
-        # For URL targets on visible text: find item TITLES (not URLs, which aren't in innerText).
-        # E.g. for "job links", find job titles like "VP Quality", "Software Engineer"
-        # These titles can then be searched in HTML to find the surrounding <a href="...">
-        item_type = "job" if "job" in target_lower else "item"
-        prompt = (
-            f"I need to extract '{target}' from the page. The visible text is below.\n"
-            f"Find 3-5 distinct {item_type} TITLES or NAMES that appear in this text.\n"
-            f"These should be specific item names, NOT generic phrases like 'Apply' or 'Jobs powered by'.\n"
-            f"Look for things like: job titles, product names, article headlines, etc.\n\n"
-            f"Return ONLY a JSON object: {{\"examples\": [\"Item Title 1\", \"Item Title 2\"]}}\n"
-            f"If none found, return {{\"examples\": []}}.\n\n"
-            f"CONTENT:\n{snippet}"
-        )
-    else:
-        prompt = (
-            f"I need to extract '{target}' from the content below.\n"
-            f"Identify 3-5 distinct, concrete examples of '{target}' found in the text.\n"
-            f"Return the EXACT substrings as they appear in the content.\n"
-            f"Return ONLY a JSON object: {{\"examples\": [\"example1\", \"example2\"]}}\n"
-            f"If none found, return {{\"examples\": []}}.\n\n"
-            f"CONTENT:\n{snippet}"
-        )
+    prompt = (
+        f"I need to extract '{target}' from the text content below.\n"
+        f"Identify 3-5 distinct, concrete examples of text that represent '{target}'.\n"
+        f"Return the EXACT substrings as they appear in the content.\n"
+        f"These should be specific items, NOT generic phrases.\n"
+        f"Return ONLY a JSON object: {{\"examples\": [\"example1\", \"example2\"]}}\n"
+        f"If none found, return {{\"examples\": []}}.\n\n"
+        f"CONTENT:\n{snippet}"
+    )
     
     try:
         resp = llm.generate_text(prompt, extra_params={"response_format": {"type": "json_object"}})
@@ -169,11 +170,11 @@ def _find_examples_via_llm(text: str, target: str, llm: LLMClient, find_titles_f
                     examples = [str(x) for x in v if x]
                     break
         
-        logger.info(f"LLM found {len(examples)} examples for '{target}': {examples[:3]}")
+        logger.info(f"Step 2: LLM found {len(examples)} matching texts for '{target}': {examples[:3]}")
         return examples
         
     except Exception as e:
-        logger.warning(f"Example finding via LLM failed: {e}")
+        logger.warning(f"Step 2 failed - LLM text matching error: {e}")
         return []
 
 
@@ -220,21 +221,19 @@ def _find_structured_examples_via_llm(text: str, target: str, keywords: List[str
 
 # ==================== EXTRACTION PIPELINE HELPERS ====================
 
-def _detect_target_type(target: str, keywords: List[str]) -> Dict[str, bool]:
+def _detect_target_type(keywords: List[str]) -> Dict[str, bool]:
     """Detect the type of extraction target."""
-    target_lower = (target or "").lower()
     return {
-        "is_url_target": any(word in target_lower for word in ['link', 'url', 'href', 'uri']),
         "is_multi_field": len(keywords) >= 3,
     }
 
 
-def _prepare_search_content(inner_text: str, html_content: str, is_url_target: bool) -> Dict[str, str]:
+def _prepare_search_content(inner_text: str, html_content: str) -> Dict[str, str]:
     """Prepare content sources for extraction."""
     max_content_len = 1000000
     text_content = inner_text[:max_content_len]
     
-    # Prepare HTML content, falling back to text if not available
+    # Always use HTML for search_content (has more structure for regex)
     if html_content:
         html_search = html_content[:max_content_len]
     else:
@@ -242,7 +241,7 @@ def _prepare_search_content(inner_text: str, html_content: str, is_url_target: b
     
     return {
         "text_content": text_content,
-        "search_content": html_search if is_url_target else text_content,
+        "search_content": html_search,
     }
 
 
@@ -263,52 +262,63 @@ def _check_cached_parser(db, domain: str, keywords: List[str], search_content: s
     return {"used_parser": None, "matches": [], "used_cached": False}
 
 
-def _find_examples_for_extraction(
-    task_id: str, text_content: str, intent: Dict, 
-    is_url_target: bool, is_multi_field: bool, keywords: List[str], llm: LLMClient
+def _step2_find_matching_text(
+    task_id: str, inner_text: str, intent: Dict, 
+    is_multi_field: bool, keywords: List[str], llm: LLMClient
 ) -> List[str]:
-    """Step 1: Find examples based on target type."""
+    """Step 2: Find raw text that matches the keyword via LLM (from inner_text)."""
     target = intent.get("target", "") or "target data"
-    example_texts = []
+    matched_texts = []
     
-    if is_url_target:
-        _log_event(task_id, "step_1_llm_for_url_target")
-        example_texts = _find_examples_via_llm(text_content, target, llm)
-    elif is_multi_field:
-        _log_event(task_id, "step_1_llm_for_multi_field")
-        example_texts = _find_structured_examples_via_llm(text_content, target, keywords, llm)
+    if is_multi_field:
+        _log_event(task_id, "step_2_llm_multi_field_matching")
+        matched_texts = _find_structured_examples_via_llm(inner_text, target, keywords, llm)
     else:
-        examples_found = find_target_examples(text_content, keywords=keywords, target=target, max_examples=5)
-        example_texts = [e["text"] for e in examples_found]
+        # Use LLM to find matching text in inner_text
+        _log_event(task_id, "step_2_llm_text_matching")
+        matched_texts = _find_matching_text_via_llm(inner_text, target, llm)
     
-    # Fallback to LLM if no examples found
-    if not example_texts:
-        _log_event(task_id, "step_1_fallback_llm_examples")
-        example_texts = _find_examples_via_llm(text_content, target, llm)
+    # Last resort: use keywords as fallback
+    if not matched_texts:
+        matched_texts = keywords[:3]
     
-    # Last resort: use keywords
-    if not example_texts:
-        example_texts = keywords[:3]
-    
-    return example_texts
+    return matched_texts
 
 
-def _find_best_snippet(
-    task_id: str, search_content: str, example_texts: List[str], 
-    intent: Dict, llm: LLMClient, is_url_target: bool
+def _steps3_4_find_and_select_snippet(
+    task_id: str, html_content: str, matched_texts: List[str], 
+    intent: Dict, llm: LLMClient
 ) -> str:
-    """Steps 2-3: Find candidates and select best snippet."""
-    _log_event(task_id, "step_2_find_candidates", example_count=len(example_texts), using_html=is_url_target)
-    candidates = _find_candidates_in_content(search_content, example_texts)
+    """Steps 3-4: Find text in raw HTML (no LLM), then select best candidate via LLM.
+    
+    Step 3: Find matched_texts in raw HTML using string search (no LLM)
+    Step 4: Provide snippets of candidates to LLM, decide best candidate
+    
+    Args:
+        task_id: Task ID for logging
+        html_content: Raw HTML content to search in
+        matched_texts: Text examples found via LLM from inner_text (step 2)
+        intent: Extraction intent
+        llm: LLM client for step 4 disambiguation
+        
+    Returns:
+        Best snippet for regex generation
+    """
+    # Step 3: Find text in raw HTML (no LLM, pure string search)
+    _log_event(task_id, "step_3_find_in_html", text_count=len(matched_texts))
+    candidates = _find_text_in_html(html_content, matched_texts)
+    _log_event(task_id, "step_3_candidates_found", candidate_count=len(candidates))
     
     best_snippet = ""
     if candidates:
-        _log_event(task_id, "step_3_disambiguate", candidate_count=len(candidates))
-        best = _disambiguate_candidate(candidates, intent, llm)
+        # Step 4: Provide snippets to LLM, select best candidate
+        _log_event(task_id, "step_4_select_best_candidate", candidate_count=len(candidates))
+        best = _select_best_candidate_via_llm(candidates, intent, llm)
         best_snippet = best.get("snippet", "")
     
+    # Fallback: extract snippet around first matched text
     if not best_snippet:
-        snip = extract_snippet_around_example(search_content, example_texts[0] if example_texts else "", max_chars=4000)
+        snip = extract_snippet_around_example(html_content, matched_texts[0] if matched_texts else "", max_chars=4000)
         best_snippet = cast(str, snip.get("snippet", ""))
     
     return best_snippet
@@ -388,29 +398,17 @@ def _run_multi_field_extraction(
 def _run_single_field_extraction(
     task_id: str, url: str, intent: Dict, example_texts: List[str],
     search_content: str, best_snippet: str, snippet_to_use: str,
-    is_url_target: bool, llm: LLMClient, db
+    llm: LLMClient, db
 ) -> List[Dict[str, Any]]:
     """Generate regex for single-field extraction."""
     import re as _re
     
     target = intent.get("target", "") or "target data"
-    regex_examples = example_texts
-    
-    # For URL targets, extract actual URLs from snippet
-    if is_url_target and best_snippet:
-        url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
-        found_urls = _re.findall(url_pattern, best_snippet)
-        if found_urls:
-            regex_examples = list(dict.fromkeys(found_urls))[:5]
-            _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
-        regex_target_desc = f"{target} - extract href URL values from <a> tags"
-    else:
-        regex_target_desc = target
 
     gen = regex_generation.iterative_regex_generation(
         source=search_content,
-        examples=regex_examples,
-        target_desc=regex_target_desc,
+        examples=example_texts,
+        target_desc=target,
         llm=llm,
         max_iterations=3,
         snippet=snippet_to_use
@@ -424,11 +422,6 @@ def _run_single_field_extraction(
         
         if matches:
             unique_matches = list(dict.fromkeys(matches))  # Dedupe
-            
-            # Filter base URL for URL targets
-            if is_url_target:
-                base_url = url.rstrip('/')
-                unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
             
             if unique_matches:
                 extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
@@ -508,14 +501,12 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         llm = LLMClient.from_env()
         domain = urlparse(url).netloc
         keywords = intent.get("keywords", [])
-        target = intent.get("target", "") or ""
         
         # Detect target type and prepare content
-        target_type = _detect_target_type(target, keywords)
-        is_url_target = target_type["is_url_target"]
+        target_type = _detect_target_type(keywords)
         is_multi_field = target_type["is_multi_field"]
         
-        content = _prepare_search_content(inner_text, html_content, is_url_target)
+        content = _prepare_search_content(inner_text, html_content)
         text_content = content["text_content"]
         search_content = content["search_content"]
         
@@ -530,32 +521,38 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
         else:
             # UNIVERSAL REGEX PIPELINE
-            _log_event(task_id, "step_1_find_examples", is_url_target=is_url_target, is_multi_field=is_multi_field)
+            # Flow: inner_text -> LLM finds matching text -> find in HTML (no LLM) -> 
+            #       snippets + LLM picks best -> generate regex on best snippet
             
-            # Step 1: Find examples
-            example_texts = _find_examples_for_extraction(
-                task_id, text_content, intent, is_url_target, is_multi_field, keywords, llm
+            # Step 1: Get inner text (already done in content preparation)
+            _log_event(task_id, "step_1_inner_text_ready", length=len(text_content))
+            
+            # Step 2: Find raw text that matches the keyword via LLM (from inner_text)
+            matched_texts = _step2_find_matching_text(
+                task_id, text_content, intent, is_multi_field, keywords, llm
             )
-            _log_event(task_id, "examples_found", count=len(example_texts), samples=example_texts[:3])
+            _log_event(task_id, "step_2_complete", count=len(matched_texts), samples=matched_texts[:3])
             
-            # Steps 2-3: Find best snippet
-            best_snippet = _find_best_snippet(task_id, search_content, example_texts, intent, llm, is_url_target)
+            # Steps 3-4: Find text in raw HTML (no LLM) -> select best candidate via LLM
+            best_snippet = _steps3_4_find_and_select_snippet(
+                task_id, search_content, matched_texts, intent, llm
+            )
             
-            # Step 4: Generate Regex
-            _log_event(task_id, "step_4_generate_regex")
+            # Step 5: Generate regex on the best snippet
+            _log_event(task_id, "step_5_generate_regex")
             snippet_to_use = best_snippet
             if len(search_content) > 10000 and len(best_snippet) < 4000:
-                if any(ex not in best_snippet for ex in example_texts):
+                if any(ex not in best_snippet for ex in matched_texts):
                     snippet_to_use = search_content[:32000]
 
             if is_multi_field:
                 extracted_data = _run_multi_field_extraction(
-                    task_id, keywords, example_texts, search_content, snippet_to_use, llm
+                    task_id, keywords, matched_texts, search_content, snippet_to_use, llm
                 )
             else:
                 extracted_data = _run_single_field_extraction(
-                    task_id, url, intent, example_texts, search_content, 
-                    best_snippet, snippet_to_use, is_url_target, llm, db
+                    task_id, url, intent, matched_texts, search_content, 
+                    best_snippet, snippet_to_use, llm, db
                 )
 
         # Persist Results

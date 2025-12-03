@@ -68,12 +68,32 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, 
         page.on("response", handle_response)
         
         try:
-            # Navigate
+            # Navigate - use networkidle for better JS content loading
             timeout = int(os.getenv("PLAYWRIGHT_NAV_TIMEOUT_MS", "30000"))
-            await page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            wait_until = os.getenv("PLAYWRIGHT_WAIT_UNTIL", "networkidle")
+            await page.goto(url, timeout=timeout, wait_until=wait_until)
+            
+            # Try to dismiss common cookie consent banners
+            try:
+                cookie_selectors = [
+                    'button:has-text("Accept")',
+                    'button:has-text("Accept All")',
+                    'button:has-text("I Accept")',
+                    'button:has-text("Got it")',
+                    '[id*="cookie"] button',
+                    '[class*="cookie"] button:has-text("Accept")',
+                ]
+                for selector in cookie_selectors:
+                    btn = page.locator(selector).first
+                    if await btn.is_visible(timeout=500):
+                        await btn.click()
+                        await page.wait_for_timeout(500)
+                        break
+            except Exception:
+                pass  # Cookie banner dismissal is optional
             
             # Wait for some settlement (optional)
-            settle = int(os.getenv("PLAYWRIGHT_SETTLE_DELAY_MS", "1000"))
+            settle = int(os.getenv("PLAYWRIGHT_SETTLE_DELAY_MS", "2000"))
             if settle > 0:
                 await page.wait_for_timeout(settle)
             
