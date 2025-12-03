@@ -59,6 +59,97 @@ def _extract_snippet(content: str, idx: int, example_len: int, context: int = 30
     return content[s_start:s_end]
 
 
+def _extract_attribute_from_html_by_text(html_content: str, text_examples: List[str], attribute: str) -> List[str]:
+    """Extract specific attribute values from HTML by finding elements that contain the given text examples.
+    
+    Args:
+        html_content: Raw HTML content
+        text_examples: List of visible text strings to look for in tags
+        attribute: The attribute to extract (e.g., 'href', 'src', 'data-id')
+        
+    Returns:
+        List of unique attribute values found
+    """
+    import re
+    values = []
+    seen_values: set = set()
+    
+    # Normalize attribute name
+    attr = attribute.lower()
+    
+    # Heuristic regex: Find opening tag with the attribute, capture value and some following content
+    # This captures: <TAG ... attr="VALUE" ...>...CONTENT...
+    # We look for the example text in ...CONTENT...
+    
+    # Note: This is a simplified regex for HTML parsing. It works well for standard <a> tags
+    # and elements where text is immediately inside.
+    pattern = re.compile(
+        f'<[^>]*\\s+{re.escape(attr)}=["\']([^"\']+)["\'][^>]*>(.*?)</',
+        re.IGNORECASE | re.DOTALL
+    )
+    
+    for match in pattern.finditer(html_content):
+        val = match.group(1)
+        content = match.group(2)
+        
+        # Strip inner tags from content to get visible text
+        clean_text = re.sub(r'<[^>]+>', '', content).strip()
+        
+        # Check if any example text appears in the content
+        for example in text_examples:
+            if example and example.lower() in clean_text.lower():
+                # Normalize value (basic)
+                if val and val not in seen_values and not val.startswith('#') and not val.startswith('javascript:'):
+                    values.append(val)
+                    seen_values.add(val)
+                break
+                
+    return values
+
+
+def _extract_attribute_via_llm(html_content: str, text_examples: List[str], target: str, attribute: str, llm: LLMClient) -> List[str]:
+    """Use LLM to extract attributes from HTML when regex approach fails."""
+    # Find snippets around the text examples
+    snippets = []
+    for ex in text_examples[:3]:
+        idx = html_content.lower().find(ex.lower())
+        if idx != -1:
+            snippet = _extract_snippet(html_content, idx, len(ex), context=500)
+            snippets.append(snippet)
+    
+    if not snippets:
+        snippets = [html_content[:10000]]
+    
+    combined_snippets = "\n---\n".join(snippets[:3])[:15000]
+    
+    prompt = (
+        f"I need to extract '{attribute}' attributes related to '{target}'.\n"
+        f"The text examples associated with these elements are: {text_examples[:5]}\n"
+        f"Find the values of the '{attribute}' attribute for elements matching these text descriptions.\n"
+        f"Return ONLY a JSON object: {{\"values\": [\"value1\", \"value2\"]}}\n"
+        f"If none found, return {{\"values\": []}}.\n\n"
+        f"HTML SNIPPETS:\n{combined_snippets}"
+    )
+    
+    try:
+        resp = llm.generate_text(prompt, extra_params={"response_format": {"type": "json_object"}})
+        data = _json.loads(resp)
+        
+        values = []
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, list):
+                    values = [str(u) for u in v if u]
+                    break
+        
+        logger.info(f"LLM extracted {len(values)} {attribute} values for '{target}'")
+        return values
+        
+    except Exception as e:
+        logger.warning(f"LLM attribute extraction failed: {e}")
+        return []
+
+
 def _find_text_in_raw_content(raw_content: str, text_examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
     """Step 3: Find text examples in raw content (no LLM, pure string search).
     
@@ -134,28 +225,43 @@ def _select_best_candidate_via_llm(candidates: List[Dict], intent: Dict, llm: LL
     
     return candidates[0]
 
-def _find_matching_text_via_llm(inner_text: str, target: str, llm: LLMClient) -> List[str]:
+def _find_matching_text_via_llm(inner_text: str, target: str, llm: LLMClient, is_attribute_target: bool = False) -> List[str]:
     """Step 2: Use LLM to find raw text matching the keyword in inner_text.
     
     Args:
         inner_text: The inner text content (not HTML)
         target: The target data type (e.g. "job links", "prices")
         llm: LLM client
+        is_attribute_target: If True, we're looking for text anchors for attribute extraction
         
     Returns:
         List of exact text strings found that match the target
     """
     snippet = inner_text[:32768]
     
-    prompt = (
-        f"I need to extract '{target}' from the text content below.\n"
-        f"Identify 3-5 distinct, concrete examples of text that represent '{target}'.\n"
-        f"Return the EXACT substrings as they appear in the content.\n"
-        f"These should be specific items, NOT generic phrases.\n"
-        f"Return ONLY a JSON object: {{\"examples\": [\"example1\", \"example2\"]}}\n"
-        f"If none found, return {{\"examples\": []}}.\n\n"
-        f"CONTENT:\n{snippet}"
-    )
+    if is_attribute_target:
+        # For attribute targets (links, images, etc), we need to find the visible TEXT
+        # that anchors the element (e.g. link text, alt text, caption)
+        prompt = (
+            f"I need to find '{target}' from this page, which are likely in HTML attributes.\n"
+            f"Identify 3-5 distinct visible TEXT labels that represent or anchor these items.\n"
+            f"For links, this is the clickable text. For images, this might be the caption or alt text.\n"
+            f"Return the EXACT text labels as they appear in the content.\n"
+            f"Do NOT return URLs/attributes - return the visible text.\n"
+            f"Return ONLY a JSON object: {{\"examples\": [\"Label 1\", \"Label 2\"]}}\n"
+            f"If none found, return {{\"examples\": []}}.\n\n"
+            f"CONTENT:\n{snippet}"
+        )
+    else:
+        prompt = (
+            f"I need to extract '{target}' from the text content below.\n"
+            f"Identify 3-5 distinct, concrete examples of text that represent '{target}'.\n"
+            f"Return the EXACT substrings as they appear in the content.\n"
+            f"These should be specific items, NOT generic phrases.\n"
+            f"Return ONLY a JSON object: {{\"examples\": [\"example1\", \"example2\"]}}\n"
+            f"If none found, return {{\"examples\": []}}.\n\n"
+            f"CONTENT:\n{snippet}"
+        )
     
     try:
         resp = llm.generate_text(prompt, extra_params={"response_format": {"type": "json_object"}})
@@ -221,11 +327,6 @@ def _find_structured_examples_via_llm(text: str, target: str, keywords: List[str
 
 # ==================== EXTRACTION PIPELINE HELPERS ====================
 
-def _detect_target_type(keywords: List[str]) -> Dict[str, bool]:
-    """Detect the type of extraction target."""
-    return {
-        "is_multi_field": len(keywords) >= 3,
-    }
 
 
 def _prepare_search_content(inner_text: str, raw_content: str) -> Dict[str, str]:
@@ -269,7 +370,7 @@ def _check_cached_parser(db, domain: str, keywords: List[str], search_content: s
 
 def _step2_find_matching_text(
     task_id: str, inner_text: str, intent: Dict, 
-    is_multi_field: bool, keywords: List[str], llm: LLMClient
+    is_multi_field: bool, is_attribute_target: bool, keywords: List[str], llm: LLMClient
 ) -> List[str]:
     """Step 2: Find raw text that matches the keyword via LLM (from inner_text)."""
     target = intent.get("target", "") or "target data"
@@ -280,8 +381,8 @@ def _step2_find_matching_text(
         matched_texts = _find_structured_examples_via_llm(inner_text, target, keywords, llm)
     else:
         # Use LLM to find matching text in inner_text
-        _log_event(task_id, "step_2_llm_text_matching")
-        matched_texts = _find_matching_text_via_llm(inner_text, target, llm)
+        _log_event(task_id, "step_2_llm_text_matching", is_attribute_target=is_attribute_target)
+        matched_texts = _find_matching_text_via_llm(inner_text, target, llm, is_attribute_target=is_attribute_target)
     
     # Last resort: use keywords as fallback
     if not matched_texts:
@@ -400,6 +501,46 @@ def _run_multi_field_extraction(
     return extracted_data
 
 
+def _run_attribute_extraction(
+    task_id: str, _url: str, intent: Dict, text_examples: List[str],
+    html_content: str, llm: LLMClient, _db
+) -> List[Dict[str, Any]]:
+    """Extract attributes from HTML using text examples as anchors.
+    
+    This is a generic extraction for when source_type is 'attribute'.
+    We use the text examples (visible text) to find corresponding attribute values.
+    """
+    target = intent.get("target", "") or "target data"
+    attribute = intent.get("target_attribute", "") or "href" # default to href if missing
+    
+    _log_event(task_id, "attribute_extraction_start", attribute=attribute, text_examples=text_examples[:3])
+    
+    # First try: Simple regex-based extraction
+    values = _extract_attribute_from_html_by_text(html_content, text_examples, attribute)
+    _log_event(task_id, "attribute_extraction_regex", found_count=len(values))
+    
+    # If regex approach didn't find enough, try LLM
+    if len(values) < len(text_examples) // 2:
+        _log_event(task_id, "attribute_extraction_llm_fallback")
+        llm_values = _extract_attribute_via_llm(html_content, text_examples, target, attribute, llm)
+        # Merge, avoiding duplicates
+        seen = set(values)
+        for v in llm_values:
+            if v not in seen:
+                values.append(v)
+                seen.add(v)
+    
+    extracted_data = []
+    if values:
+        unique_values = list(dict.fromkeys(values))  # Preserve order, dedupe
+        extracted_data = [{"text": v, "source": f"{attribute}_extraction", "confidence": 0.95} for v in unique_values]
+        _log_event(task_id, "attribute_extraction_success", count=len(unique_values))
+    else:
+        _log_event(task_id, "attribute_extraction_failed", text_example_count=len(text_examples))
+    
+    return extracted_data
+
+
 def _run_single_field_extraction(
     task_id: str, url: str, intent: Dict, example_texts: List[str],
     search_content: str, best_snippet: str, snippet_to_use: str,
@@ -506,17 +647,29 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         llm = LLMClient.from_env()
         domain = urlparse(url).netloc
         keywords = intent.get("keywords", [])
+        target = intent.get("target", "")
         
         # Detect target type and prepare content
-        target_type = _detect_target_type(keywords)
-        is_multi_field = target_type["is_multi_field"]
+        # We rely on the intent extractor to tell us if this is an attribute extraction
+        target_attribute = intent.get("target_attribute")
+        is_attribute_target = bool(target_attribute) or intent.get("source_type") == "attribute"
+        # Fallback: if source_type is attribute but no attribute specified, default to href (most common)
+        if is_attribute_target and not target_attribute:
+            target_attribute = "href"
+            
+        # Also detect multi-field
+        is_multi_field = len(keywords) >= 3 and not is_attribute_target
+        
+        _log_event(task_id, "target_type_detected", is_multi_field=is_multi_field, is_attribute_target=is_attribute_target, target_attribute=target_attribute)
         
         content = _prepare_search_content(inner_text, html_content)
         text_content = content["text_content"]
         search_content = content["search_content"]
         
-        # Check for cached parser
-        cache_result = _check_cached_parser(db, domain, keywords, search_content)
+        # Check for cached parser (skip for attribute targets as they use different approach)
+        cache_result = {"used_parser": None, "matches": [], "used_cached": False}
+        if not is_attribute_target:
+            cache_result = _check_cached_parser(db, domain, keywords, search_content)
         used_parser = cache_result["used_parser"]
         used_cached = cache_result["used_cached"]
         
@@ -525,40 +678,48 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         if cache_result["matches"]:
             extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
         else:
-            # UNIVERSAL REGEX PIPELINE
-            # Flow: inner_text -> LLM finds matching text -> find in raw content (no LLM) -> 
-            #       snippets + LLM picks best -> generate regex on best snippet
+            # UNIVERSAL EXTRACTION PIPELINE
+            # Flow depends on target type:
+            # - Attribute targets (e.g. URLs, SRCs): Find text anchors -> extract attribute
+            # - Text targets: Find text examples -> generate regex
             
             # Step 1: Get inner text (already done in content preparation)
             _log_event(task_id, "step_1_inner_text_ready", length=len(text_content))
             
             # Step 2: Find raw text that matches the keyword via LLM (from inner_text)
             matched_texts = _step2_find_matching_text(
-                task_id, text_content, intent, is_multi_field, keywords, llm
+                task_id, text_content, intent, is_multi_field, is_attribute_target, keywords, llm
             )
             _log_event(task_id, "step_2_complete", count=len(matched_texts), samples=matched_texts[:3])
             
-            # Steps 3-4: Find text in raw content (no LLM) -> select best candidate via LLM
-            best_snippet = _steps3_4_find_and_select_snippet(
-                task_id, search_content, matched_texts, intent, llm
-            )
-            
-            # Step 5: Generate regex on the best snippet
-            _log_event(task_id, "step_5_generate_regex")
-            snippet_to_use = best_snippet
-            if len(search_content) > 10000 and len(best_snippet) < 4000:
-                if any(ex not in best_snippet for ex in matched_texts):
-                    snippet_to_use = search_content[:32000]
-
-            if is_multi_field:
-                extracted_data = _run_multi_field_extraction(
-                    task_id, keywords, matched_texts, search_content, snippet_to_use, llm
+            if is_attribute_target:
+                # Attribute extraction path
+                extracted_data = _run_attribute_extraction(
+                    task_id, url, intent, matched_texts, html_content, llm, db
                 )
             else:
-                extracted_data = _run_single_field_extraction(
-                    task_id, url, intent, matched_texts, search_content, 
-                    best_snippet, snippet_to_use, llm, db
+                # Standard regex extraction path
+                # Steps 3-4: Find text in raw content (no LLM) -> select best candidate via LLM
+                best_snippet = _steps3_4_find_and_select_snippet(
+                    task_id, search_content, matched_texts, intent, llm
                 )
+                
+                # Step 5: Generate regex on the best snippet
+                _log_event(task_id, "step_5_generate_regex")
+                snippet_to_use = best_snippet
+                if len(search_content) > 10000 and len(best_snippet) < 4000:
+                    if any(ex not in best_snippet for ex in matched_texts):
+                        snippet_to_use = search_content[:32000]
+
+                if is_multi_field:
+                    extracted_data = _run_multi_field_extraction(
+                        task_id, keywords, matched_texts, search_content, snippet_to_use, llm
+                    )
+                else:
+                    extracted_data = _run_single_field_extraction(
+                        task_id, url, intent, matched_texts, search_content, 
+                        best_snippet, snippet_to_use, llm, db
+                    )
 
         # Persist Results
         if extracted_data:

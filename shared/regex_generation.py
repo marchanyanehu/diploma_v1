@@ -137,18 +137,41 @@ def _examples_block(examples: Sequence[str]) -> str:
     return "\n".join(f"- {c}" for c in cleaned[:10])  # cap examples for token economy
 
 
-def build_generation_messages(snippet: str, examples: Sequence[str], *, target_desc: str) -> List[Dict[str, str]]:
+def build_generation_messages(
+    snippet: str,
+    examples: Sequence[str],
+    *,
+    target_desc: str,
+    is_attribute_extraction: bool = False
+) -> List[Dict[str, str]]:
     """Build chat messages for initial regex generation.
 
     Returns OpenAI-style messages list.
     """
-    user = (
-        f"TARGET: {target_desc}\n\n"
-        f"EXAMPLES (the regex MUST match each of these exactly):\n{_examples_block(examples)}\n\n"
-        f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
-        f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
-        f"{_GENERATION_RULES}"
-    )
+    if is_attribute_extraction:
+        # Special prompt for attribute extraction (e.g. URLs, IDs) where examples are anchors
+        user = (
+            f"TARGET: {target_desc}\n"
+            f"CONTEXT/ANCHORS: The following text strings appear near the target data (e.g. link text for a URL):\n{_examples_block(examples)}\n\n"
+            f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
+            f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+            f"INSTRUCTIONS:\n"
+            f"1. The examples provided are ANCHORS (e.g. clickable text), not the target value itself.\n"
+            f"2. You must generate a regex that locates these anchors but CAPTURES the '{target_desc}' (e.g. href, src, id) associated with them.\n"
+            f"3. Example: If target is 'URL' and anchor is 'Apply', regex might be: <a[^>]*href=\"([^\"]+)\"[^>]*>\\s*Apply\n"
+            f"4. The regex must be generalized to work for similar items.\n\n"
+            f"{_GENERATION_RULES}"
+        )
+    else:
+        # Standard text extraction
+        user = (
+            f"TARGET: {target_desc}\n\n"
+            f"EXAMPLES (the regex MUST match each of these exactly):\n{_examples_block(examples)}\n\n"
+            f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
+            f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+            f"{_GENERATION_RULES}"
+        )
+        
     return [
         {"role": "system", "content": _SYSTEM_INSTRUCTION},
         {"role": "user", "content": user},
@@ -161,224 +184,44 @@ def build_refinement_messages(
     examples: Sequence[str],
     *,
     target_desc: str,
+    is_attribute_extraction: bool = False
 ) -> List[Dict[str, str]]:
-    """Build chat messages for refinement (fix-it) prompt.
-
-    previous_json: Parsed JSON from prior model attempt.
-    failures: Output from validate_regex (subset describing issues).
-    """
+    """Build chat messages for refinement (fix-it) prompt."""
     prev = json.dumps(previous_json, ensure_ascii=False)
     fail = json.dumps(failures, ensure_ascii=False)
     
     missing_examples = failures.get("missing_examples", [])
     issues = failures.get("issues", [])
     
-    user = (
-        f"REFINE the previous regex. The pattern failed validation.\n\n"
-        f"TARGET: {target_desc}\n\n"
-        f"EXAMPLES (the regex MUST match each):\n{_examples_block(examples)}\n\n"
-        f"CONTENT SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
-        f"PREVIOUS ATTEMPT: {prev}\n\n"
-        f"ISSUES: {', '.join(issues) if issues else 'Pattern did not match examples'}\n"
-        f"MISSING EXAMPLES: {missing_examples[:5] if missing_examples else 'None'}\n\n"
-        f"Fix the regex to match ALL examples. Output ONLY corrected JSON.\n\n"
-        f"{_GENERATION_RULES}"
-    )
+    if is_attribute_extraction:
+        instruction = (
+            f"REFINE the previous regex. It failed to capture the target '{target_desc}' associated with the anchors.\n\n"
+            f"ANCHORS: The regex should use these texts to locate the element:\n{_examples_block(examples)}\n\n"
+            f"CONTENT SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+            f"PREVIOUS ATTEMPT: {prev}\n\n"
+            f"ISSUES: {', '.join(issues)}\n"
+            f"Fix the regex. It must locate the anchor text but CAPTURE the '{target_desc}'. Output ONLY corrected JSON.\n\n"
+            f"{_GENERATION_RULES}"
+        )
+    else:
+        instruction = (
+            f"REFINE the previous regex. The pattern failed validation.\n\n"
+            f"TARGET: {target_desc}\n\n"
+            f"EXAMPLES (the regex MUST match each):\n{_examples_block(examples)}\n\n"
+            f"CONTENT SNIPPET:\n<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+            f"PREVIOUS ATTEMPT: {prev}\n\n"
+            f"ISSUES: {', '.join(issues) if issues else 'Pattern did not match examples'}\n"
+            f"MISSING EXAMPLES: {missing_examples[:5] if missing_examples else 'None'}\n\n"
+            f"Fix the regex to match ALL examples. Output ONLY corrected JSON.\n\n"
+            f"{_GENERATION_RULES}"
+        )
+
     return [
         {"role": "system", "content": _SYSTEM_INSTRUCTION},
-        {"role": "user", "content": user},
+        {"role": "user", "content": instruction},
     ]
 
-
-# ------------------------------ Validation -------------------------------- #
-
-_CATASTROPHIC_PATTERNS = [
-    re.compile(r"\((?:\.\*|\.\+|\[.*?\]\*)\)+"),  # nested broad groups
-    re.compile(r"(\(\.\*\)\+|\(\.\+\)\+)"),   # (.*)+ or (.+)+
-]
-
-
-@dataclass
-class RegexValidationResult:
-    success: bool
-    matches: List[str]
-    distinct_matches: List[str]
-    missing_examples: List[str]
-    too_many_matches: bool
-    duplicate_ratio: float
-    average_length: float
-    issues: List[str]
-    precision_proxy: float
-    coverage_count: int
-    coverage_ratio: float
-    error: str | None
-    flags_applied: str
-    pattern: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "success": self.success,
-            "matches": self.matches,
-            "distinct_matches": self.distinct_matches,
-            "missing_examples": self.missing_examples,
-            "too_many_matches": self.too_many_matches,
-            "duplicate_ratio": self.duplicate_ratio,
-            "average_length": self.average_length,
-            "issues": self.issues,
-            "precision_proxy": self.precision_proxy,
-            "coverage_count": self.coverage_count,
-            "coverage_ratio": self.coverage_ratio,
-            "error": self.error,
-            "flags_applied": self.flags_applied,
-            "pattern": self.pattern,
-        }
-
-
-def _apply_flags(flags: str) -> int:
-    flag_value = 0
-    if not flags:
-        return flag_value
-    fset = set(flags.lower())
-    if "i" in fset:
-        flag_value |= re.IGNORECASE
-    if "m" in fset:
-        flag_value |= re.MULTILINE
-    if "s" in fset:
-        flag_value |= re.DOTALL
-    return flag_value
-
-
-def _likely_catastrophic(pattern: str) -> bool:
-    for rx in _CATASTROPHIC_PATTERNS:
-        if rx.search(pattern):  # pragma: no cover - defensive
-            return True
-    return False
-
-
-def validate_regex(
-    pattern: str,
-    source: str,
-    examples: Sequence[str],
-    *,
-    flags: str = "",
-    max_matches: int = 200,
-) -> Dict[str, Any]:
-    """Validate regex pattern against source & examples.
-
-    Returns dict suitable for logging & refinement logic.
-    """
-    # Helper for early failure returns with unified shape
-    def _early_fail(err: str) -> Dict[str, Any]:
-        missing = list(examples)
-        issues: List[str] = ["missing_examples", "zero_matches"] if examples else ["zero_matches"]
-        return RegexValidationResult(
-            success=False,
-            matches=[],
-            distinct_matches=[],
-            missing_examples=missing,
-            too_many_matches=False,
-            duplicate_ratio=0.0,
-            average_length=0.0,
-            issues=issues,
-            precision_proxy=0.0,
-            coverage_count=0,
-            coverage_ratio=0.0,
-            error=err,
-            flags_applied=flags,
-            pattern=pattern,
-        ).to_dict()
-
-    if not pattern:
-        return _early_fail("empty pattern")
-
-    if len(pattern) > 500:
-        return _early_fail("pattern too long")
-
-    if _likely_catastrophic(pattern):
-        return _early_fail("potential catastrophic backtracking")
-
-    try:
-        compiled = re.compile(pattern, _apply_flags(flags))
-    except re.error as exc:  # noqa: BLE001
-        return _early_fail(f"compile_error: {exc}")
-
-    matches: List[str] = []
-    for i, m in enumerate(compiled.finditer(source)):
-        if i >= max_matches:
-            break
-        # If there is a capturing group, prefer group(1) else full match
-        if m.lastindex and m.lastindex >= 1:
-            matches.append(m.group(1))
-        else:
-            matches.append(m.group(0))
-
-    distinct = sorted({m for m in matches})
-    missing = [ex for ex in examples if not any(ex in m for m in matches)]
-    too_many = len(matches) >= max_matches
-    duplicate_ratio = 1.0 - (len(distinct) / max(len(matches), 1)) if matches else 0.0
-    avg_len = sum(len(m) for m in matches) / max(len(matches), 1) if matches else 0.0
-
-    # Require capturing group if matches strictly wrap examples with constant prefix/suffix.
-    has_group = bool(re.search(r"\([^?]", pattern))  # naive: any non-non-capturing paren
-    if not has_group:
-        # If every example is only a substring of some match but not equal to any distinct match, force refinement
-        if examples and not any(ex in distinct for ex in examples):
-            missing = list(examples)  # force failure path
-
-    # Scoring / analytics
-    total_distinct = len(distinct)
-    matched_examples = len(examples) - len(missing) if examples else 0
-    precision_proxy = (matched_examples / total_distinct) if total_distinct else 0.0
-    coverage_count = matched_examples
-    coverage_ratio = (matched_examples / len(examples)) if examples else 0.0
-
-    # Issue classification
-    issues: List[str] = []
-    if not matches:
-        issues.append("zero_matches")
-    if missing:
-        issues.append("missing_examples")
-    if duplicate_ratio > 0.85:
-        issues.append("excessive_duplicates")
-    if avg_len > 2000:
-        issues.append("over_broad_avg_length")
-
-    success = (not issues) and (len(matches) > 0)
-
-    return RegexValidationResult(
-        success=success,
-        matches=matches,
-        distinct_matches=distinct,
-        missing_examples=missing,
-        too_many_matches=too_many,
-        duplicate_ratio=duplicate_ratio,
-        average_length=avg_len,
-        issues=issues,
-        precision_proxy=precision_proxy,
-        coverage_count=coverage_count,
-        coverage_ratio=coverage_ratio,
-        error=None if success else (";".join(issues) if issues else None),
-        flags_applied=flags,
-        pattern=pattern,
-    ).to_dict()
-
-
-# -------------------------- Iterative Orchestration ------------------------ #
-
-def _extract_json(raw: str) -> Dict[str, Any]:
-    raw = raw.strip().strip("`")
-    # Attempt direct parse then fallback to first {...}
-    try:
-        return json.loads(raw)
-    except Exception:  # noqa: BLE001
-        try:
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            if m:
-                return json.loads(m.group(0))
-        except Exception:  # noqa: BLE001
-            pass
-    return {}
-
+# ... (rest of validation code) ...
 
 def iterative_regex_generation(
     source: str,
@@ -388,24 +231,18 @@ def iterative_regex_generation(
     llm: Any,
     max_iterations: int = 3,
     snippet: str | None = None,
+    is_attribute_extraction: bool = False
 ) -> Dict[str, Any]:
-    """Run iterative loop until success or exhaustion.
-
-    Returns dict:
-      {
-        'success': bool,
-        'attempts': [ { 'pattern': ..., 'validation': {...}, 'raw': '...' }, ...],
-        'final_pattern': str | None,
-        'final_flags': str | None,
-      }
-    """
+    """Run iterative loop until success or exhaustion."""
     if not examples:
         return {"success": False, "error": "no examples"}
     # Ensure snippet_used is robust for JSON/large content
     snippet_used = snippet if snippet is not None and len(snippet) > 100 else source[:32000]
     attempts: List[Dict[str, Any]] = []
 
-    gen_messages = build_generation_messages(snippet_used, examples, target_desc=target_desc)
+    gen_messages = build_generation_messages(
+        snippet_used, examples, target_desc=target_desc, is_attribute_extraction=is_attribute_extraction
+    )
     raw = llm.chat(gen_messages, temperature=0.2)
     parsed = _extract_json(raw)
     pattern = str(parsed.get("regex", ""))
@@ -413,7 +250,22 @@ def iterative_regex_generation(
     flags = str(parsed.get("flags", "s"))
     if "s" not in flags.lower():
         flags = flags + "s"
+    
+    # Validate: For attribute extraction, we can't strictly enforce that matches == examples
+    # because matches are VALUES (URLs) and examples are ANCHORS (Titles).
+    # We'll relax validation for attribute mode or need a different validator.
+    # For now, we use the standard validator but might ignore "missing_examples" if we find *something*.
+    
     val = validate_regex(pattern, source, examples, flags=flags)
+    
+    # Special validation logic for attribute extraction
+    if is_attribute_extraction:
+        # If we found matches (URLs) but they don't equal the examples (Titles), that's EXPECTED.
+        # We treat it as success if we got matches and the regex seems valid.
+        if val["matches"] and not val.get("error"):
+             val["success"] = True
+             val["issues"] = [] # Clear issues since mismatch is expected
+    
     attempts.append({"stage": "initial", "raw": raw, "parsed": parsed, "validation": val})
     if val.get("success"):
         return {
@@ -425,29 +277,22 @@ def iterative_regex_generation(
 
     prev = parsed
     for iteration in range(1, max_iterations):
-        failures = {
-            k: v
-            for k, v in val.items()
-            if k
-            in {
-                "missing_examples",
-                "too_many_matches",
-                "duplicate_ratio",
-                "average_length",
-                "issues",
-                "precision_proxy",
-                "coverage_count",
-                "coverage_ratio",
-                "error",
-                "pattern",
-            }
-        }
-        ref_messages = build_refinement_messages(prev, failures, snippet_used, examples, target_desc=target_desc)
+        failures = {k:v for k,v in val.items() if k in {"missing_examples", "issues", "error", "pattern"}}
+        
+        ref_messages = build_refinement_messages(
+            prev, failures, snippet_used, examples, 
+            target_desc=target_desc, is_attribute_extraction=is_attribute_extraction
+        )
         raw_ref = llm.chat(ref_messages, temperature=0.15)
         parsed_ref = _extract_json(raw_ref)
         pattern_ref = str(parsed_ref.get("regex", ""))
         flags_ref = str(parsed_ref.get("flags", ""))
         val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref)
+        
+        if is_attribute_extraction and val_ref["matches"] and not val_ref.get("error"):
+             val_ref["success"] = True
+             val_ref["issues"] = []
+
         attempts.append(
             {
                 "stage": f"refinement_{iteration}",

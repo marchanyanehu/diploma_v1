@@ -48,12 +48,14 @@ _INTENT_SYSTEM_PROMPT = (
     "4. keywords should be lowercased single or multi-word tokens (no duplicates).\n"
     "5. constraints are specific filters (e.g., geography, price range, date window).\n"
     "6. output_shape is a concise description of the desired result form.\n"
-    "7. target should be a short noun phrase (e.g., 'job links', 'product prices')."
+    "7. target should be a short noun phrase (e.g., 'job links', 'product prices').\n"
+    "8. source_type should be 'text' or 'attribute'. Use 'attribute' if the user wants URLs, links, images, IDs, or other data typically found in HTML attributes.\n"
+    "9. target_attribute should be the attribute name (e.g., 'href', 'src', 'data-id') if source_type is 'attribute', otherwise null."
 )
 
 _INTENT_USER_TEMPLATE = (
     "USER_REQUEST:\n{user_input}\n\n"
-    "Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence"
+    "Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence, source_type, target_attribute"
 )
 
 _JSON_FALLBACK_TEMPLATE = {
@@ -63,12 +65,15 @@ _JSON_FALLBACK_TEMPLATE = {
     "constraints": [],
     "output_shape": "",
     "confidence": 0.0,
+    "source_type": "text",
+    "target_attribute": None,
 }
 
 _JSON_EXAMPLE = (
     '{"target": "job links", "original_input": "find me senior python jobs", '
     '"keywords": ["senior", "python", "jobs"], "constraints": [""], '
-    '"output_shape": "list of job posting URLs", "confidence": 0.9}'
+    '"output_shape": "list of job posting URLs", "confidence": 0.9, '
+    '"source_type": "attribute", "target_attribute": "href"}'
 )
 
 _DEFENSIVE_JSON_REGEX = re.compile(r"\{.*\}", re.DOTALL)
@@ -128,6 +133,8 @@ def _coerce_schema(data: Dict[str, Any], original: str) -> Dict[str, Any]:
         "constraints": [str(x).strip() for x in data.get("constraints", [])][:30],
         "output_shape": str(data.get("output_shape", ""))[:120].strip(),
         "confidence": _safe_confidence(data.get("confidence", 0.0)),
+        "source_type": str(data.get("source_type", "text")).lower(),
+        "target_attribute": str(data.get("target_attribute", "") or "") or None,
     }
 
 
