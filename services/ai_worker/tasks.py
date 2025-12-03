@@ -59,11 +59,11 @@ def _extract_snippet(content: str, idx: int, example_len: int, context: int = 30
     return content[s_start:s_end]
 
 
-def _find_text_in_html(html_content: str, text_examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
-    """Step 3: Find text examples in raw HTML (no LLM, pure string search).
+def _find_text_in_raw_content(raw_content: str, text_examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
+    """Step 3: Find text examples in raw content (no LLM, pure string search).
     
     Args:
-        html_content: The raw HTML content to search in
+        raw_content: The raw content to search in (HTML, JSON, XML, etc.)
         text_examples: Text examples found via LLM from inner_text
         max_candidates: Maximum number of candidate snippets to return
         
@@ -79,11 +79,11 @@ def _find_text_in_html(html_content: str, text_examples: List[str], max_candidat
         
         start = 0
         while len(candidates) <= max_candidates:
-            idx = html_content.find(ex, start)
+            idx = raw_content.find(ex, start)
             if idx == -1:
                 break
             
-            snippet = _extract_snippet(html_content, idx, len(ex))
+            snippet = _extract_snippet(raw_content, idx, len(ex))
             if snippet not in seen_snippets:
                 candidates.append({"example_match": ex, "snippet": snippet, "offset": idx})
                 seen_snippets.add(snippet)
@@ -101,7 +101,7 @@ def _select_best_candidate_via_llm(candidates: List[Dict], intent: Dict, llm: LL
     """Step 4: Present candidate snippets to LLM and select the best one.
     
     Args:
-        candidates: List of candidate snippets found in HTML
+        candidates: List of candidate snippets found in raw content
         intent: The extraction intent with target and keywords
         llm: LLM client for decision making
         
@@ -118,7 +118,7 @@ def _select_best_candidate_via_llm(candidates: List[Dict], intent: Dict, llm: LL
     prompt = (
         f"TARGET: {intent.get('target')}\n"
         f"KEYWORDS: {intent.get('keywords')}\n"
-        f"We found these HTML snippets containing the target data. Which one is the best source for regex extraction?\n"
+        f"We found these content snippets containing the target data. Which one is the best source for regex extraction?\n"
         f"CANDIDATES:\n" + "\n".join(options[:5]) + "\n\n"
         "Return JSON: {'best_option_index': int, 'reason': str}"
     )
@@ -228,20 +228,25 @@ def _detect_target_type(keywords: List[str]) -> Dict[str, bool]:
     }
 
 
-def _prepare_search_content(inner_text: str, html_content: str) -> Dict[str, str]:
-    """Prepare content sources for extraction."""
+def _prepare_search_content(inner_text: str, raw_content: str) -> Dict[str, str]:
+    """Prepare content sources for extraction.
+    
+    Args:
+        inner_text: Clean text content (for LLM analysis)
+        raw_content: Raw content with structure (HTML, JSON, XML, etc.) for regex
+    """
     max_content_len = 1000000
     text_content = inner_text[:max_content_len]
     
-    # Always use HTML for search_content (has more structure for regex)
-    if html_content:
-        html_search = html_content[:max_content_len]
+    # Use raw content for search (has structure needed for regex)
+    if raw_content:
+        search_content = raw_content[:max_content_len]
     else:
-        html_search = text_content
+        search_content = text_content
     
     return {
         "text_content": text_content,
-        "search_content": html_search,
+        "search_content": search_content,
     }
 
 
@@ -286,17 +291,17 @@ def _step2_find_matching_text(
 
 
 def _steps3_4_find_and_select_snippet(
-    task_id: str, html_content: str, matched_texts: List[str], 
+    task_id: str, raw_content: str, matched_texts: List[str], 
     intent: Dict, llm: LLMClient
 ) -> str:
-    """Steps 3-4: Find text in raw HTML (no LLM), then select best candidate via LLM.
+    """Steps 3-4: Find text in raw content (no LLM), then select best candidate via LLM.
     
-    Step 3: Find matched_texts in raw HTML using string search (no LLM)
+    Step 3: Find matched_texts in raw content using string search (no LLM)
     Step 4: Provide snippets of candidates to LLM, decide best candidate
     
     Args:
         task_id: Task ID for logging
-        html_content: Raw HTML content to search in
+        raw_content: Raw content to search in (HTML, JSON, XML, etc.)
         matched_texts: Text examples found via LLM from inner_text (step 2)
         intent: Extraction intent
         llm: LLM client for step 4 disambiguation
@@ -304,9 +309,9 @@ def _steps3_4_find_and_select_snippet(
     Returns:
         Best snippet for regex generation
     """
-    # Step 3: Find text in raw HTML (no LLM, pure string search)
-    _log_event(task_id, "step_3_find_in_html", text_count=len(matched_texts))
-    candidates = _find_text_in_html(html_content, matched_texts)
+    # Step 3: Find text in raw content (no LLM, pure string search)
+    _log_event(task_id, "step_3_find_in_raw_content", text_count=len(matched_texts))
+    candidates = _find_text_in_raw_content(raw_content, matched_texts)
     _log_event(task_id, "step_3_candidates_found", candidate_count=len(candidates))
     
     best_snippet = ""
@@ -318,7 +323,7 @@ def _steps3_4_find_and_select_snippet(
     
     # Fallback: extract snippet around first matched text
     if not best_snippet:
-        snip = extract_snippet_around_example(html_content, matched_texts[0] if matched_texts else "", max_chars=4000)
+        snip = extract_snippet_around_example(raw_content, matched_texts[0] if matched_texts else "", max_chars=4000)
         best_snippet = cast(str, snip.get("snippet", ""))
     
     return best_snippet
@@ -521,7 +526,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
         else:
             # UNIVERSAL REGEX PIPELINE
-            # Flow: inner_text -> LLM finds matching text -> find in HTML (no LLM) -> 
+            # Flow: inner_text -> LLM finds matching text -> find in raw content (no LLM) -> 
             #       snippets + LLM picks best -> generate regex on best snippet
             
             # Step 1: Get inner text (already done in content preparation)
@@ -533,7 +538,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             )
             _log_event(task_id, "step_2_complete", count=len(matched_texts), samples=matched_texts[:3])
             
-            # Steps 3-4: Find text in raw HTML (no LLM) -> select best candidate via LLM
+            # Steps 3-4: Find text in raw content (no LLM) -> select best candidate via LLM
             best_snippet = _steps3_4_find_and_select_snippet(
                 task_id, search_content, matched_texts, intent, llm
             )
