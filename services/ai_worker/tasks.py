@@ -52,36 +52,39 @@ def _log_event(task_id: str, event: str, **fields) -> None:
     except Exception:
         logger.info("%s %s", event, fields)
 
-def _find_candidates_in_content(content: str, examples: List[str]) -> List[Dict[str, Any]]:
+def _extract_snippet(content: str, idx: int, example_len: int, context: int = 300) -> str:
+    """Extract a snippet from content around a given index."""
+    s_start = max(0, idx - context)
+    s_end = min(len(content), idx + example_len + context)
+    return content[s_start:s_end]
+
+
+def _find_candidates_in_content(content: str, examples: List[str], max_candidates: int = 20) -> List[Dict[str, Any]]:
     """Find unique snippets in content that contain the examples."""
     candidates = []
-    seen_snippets = set()
+    seen_snippets: set = set()
     
     for ex in examples:
-        if not ex or len(ex) < 3: continue
+        if not ex or len(ex) < 3:
+            continue
+        
         start = 0
-        while True:
+        while len(candidates) <= max_candidates:
             idx = content.find(ex, start)
             if idx == -1:
                 break
             
-            # Extract snippet with context
-            s_start = max(0, idx - 300)
-            s_end = min(len(content), idx + len(ex) + 300)
-            snippet = content[s_start:s_end]
-            
+            snippet = _extract_snippet(content, idx, len(ex))
             if snippet not in seen_snippets:
-                candidates.append({
-                    "example_match": ex,
-                    "snippet": snippet,
-                    "offset": idx
-                })
+                candidates.append({"example_match": ex, "snippet": snippet, "offset": idx})
                 seen_snippets.add(snippet)
             
             start = idx + 1
             if len(candidates) > 10:
                 break
-        if len(candidates) > 20: break
+        
+        if len(candidates) > max_candidates:
+            break
             
     return candidates
 
@@ -215,6 +218,239 @@ def _find_structured_examples_via_llm(text: str, target: str, keywords: List[str
         return []
 
 
+# ==================== EXTRACTION PIPELINE HELPERS ====================
+
+def _detect_target_type(target: str, keywords: List[str]) -> Dict[str, bool]:
+    """Detect the type of extraction target."""
+    target_lower = (target or "").lower()
+    return {
+        "is_url_target": any(word in target_lower for word in ['link', 'url', 'href', 'uri']),
+        "is_multi_field": len(keywords) >= 3,
+    }
+
+
+def _prepare_search_content(inner_text: str, html_content: str, is_url_target: bool) -> Dict[str, str]:
+    """Prepare content sources for extraction."""
+    max_content_len = 1000000
+    text_content = inner_text[:max_content_len]
+    
+    # Prepare HTML content, falling back to text if not available
+    if html_content:
+        html_search = html_content[:max_content_len]
+    else:
+        html_search = text_content
+    
+    return {
+        "text_content": text_content,
+        "search_content": html_search if is_url_target else text_content,
+    }
+
+
+def _check_cached_parser(db, domain: str, keywords: List[str], search_content: str) -> Dict[str, Any]:
+    """Check for and apply cached parser."""
+    parsers = db_utils.find_cached_parser(db, domain, keywords=keywords)
+    
+    for p in parsers:
+        patt, fl = _decompose_stored_regex(cast(str, p.generated_regex))
+        matches = _apply_regex_matches(patt, fl, search_content)
+        if matches:
+            return {
+                "used_parser": p,
+                "matches": matches,
+                "used_cached": True,
+            }
+    
+    return {"used_parser": None, "matches": [], "used_cached": False}
+
+
+def _find_examples_for_extraction(
+    task_id: str, text_content: str, intent: Dict, 
+    is_url_target: bool, is_multi_field: bool, keywords: List[str], llm: LLMClient
+) -> List[str]:
+    """Step 1: Find examples based on target type."""
+    target = intent.get("target", "") or "target data"
+    example_texts = []
+    
+    if is_url_target:
+        _log_event(task_id, "step_1_llm_for_url_target")
+        example_texts = _find_examples_via_llm(text_content, target, llm)
+    elif is_multi_field:
+        _log_event(task_id, "step_1_llm_for_multi_field")
+        example_texts = _find_structured_examples_via_llm(text_content, target, keywords, llm)
+    else:
+        examples_found = find_target_examples(text_content, keywords=keywords, target=target, max_examples=5)
+        example_texts = [e["text"] for e in examples_found]
+    
+    # Fallback to LLM if no examples found
+    if not example_texts:
+        _log_event(task_id, "step_1_fallback_llm_examples")
+        example_texts = _find_examples_via_llm(text_content, target, llm)
+    
+    # Last resort: use keywords
+    if not example_texts:
+        example_texts = keywords[:3]
+    
+    return example_texts
+
+
+def _find_best_snippet(
+    task_id: str, search_content: str, example_texts: List[str], 
+    intent: Dict, llm: LLMClient, is_url_target: bool
+) -> str:
+    """Steps 2-3: Find candidates and select best snippet."""
+    _log_event(task_id, "step_2_find_candidates", example_count=len(example_texts), using_html=is_url_target)
+    candidates = _find_candidates_in_content(search_content, example_texts)
+    
+    best_snippet = ""
+    if candidates:
+        _log_event(task_id, "step_3_disambiguate", candidate_count=len(candidates))
+        best = _disambiguate_candidate(candidates, intent, llm)
+        best_snippet = best.get("snippet", "")
+    
+    if not best_snippet:
+        snip = extract_snippet_around_example(search_content, example_texts[0] if example_texts else "", max_chars=4000)
+        best_snippet = cast(str, snip.get("snippet", ""))
+    
+    return best_snippet
+
+
+def _extract_field_examples(example_texts: List[str], field: str) -> List[str]:
+    """Extract field-specific examples from structured examples."""
+    field_examples = []
+    field_lower = field.lower()
+    
+    for ex in example_texts:
+        for line in ex.split('\n'):
+            if field_lower in line.lower():
+                if ':' in line:
+                    value = line.split(':', 1)[1].strip()
+                    if value:
+                        field_examples.append(value)
+                else:
+                    field_examples.append(line.strip())
+                break
+    
+    return list(dict.fromkeys(field_examples))[:3]  # Dedupe and limit
+
+
+def _run_multi_field_extraction(
+    task_id: str, keywords: List[str], example_texts: List[str],
+    search_content: str, snippet_to_use: str, llm: LLMClient
+) -> List[Dict[str, Any]]:
+    """Generate separate regex for each field and combine results."""
+    _log_event(task_id, "multi_field_extraction", fields=keywords)
+    field_results = {}
+    
+    for field in keywords:
+        field_examples = _extract_field_examples(example_texts, field)
+        if not field_examples:
+            continue
+        
+        _log_event(task_id, "field_examples", field=field, examples=field_examples)
+        
+        gen = regex_generation.iterative_regex_generation(
+            source=search_content,
+            examples=field_examples,
+            target_desc=f"{field} values",
+            llm=llm,
+            max_iterations=2,
+            snippet=snippet_to_use
+        )
+        
+        if gen.get("success"):
+            pattern = gen.get("final_pattern")
+            flags = gen.get("final_flags", "s")
+            matches = _apply_regex_matches(pattern, flags, search_content)
+            if matches:
+                unique = list(dict.fromkeys(matches))
+                field_results[field] = unique
+                _log_event(task_id, "field_regex_success", field=field, match_count=len(unique))
+    
+    # Combine field results into records
+    extracted_data = []
+    if field_results:
+        max_len = max(len(v) for v in field_results.values())
+        for i in range(max_len):
+            record = {field: values[i] for field, values in field_results.items() if i < len(values)}
+            if record:
+                text_repr = " | ".join(f"{k}: {v}" for k, v in record.items())
+                extracted_data.append({
+                    "text": text_repr,
+                    "fields": record,
+                    "source": "multi_field_regex",
+                    "confidence": 0.85
+                })
+        _log_event(task_id, "multi_field_success", record_count=len(extracted_data))
+    
+    return extracted_data
+
+
+def _run_single_field_extraction(
+    task_id: str, url: str, intent: Dict, example_texts: List[str],
+    search_content: str, best_snippet: str, snippet_to_use: str,
+    is_url_target: bool, llm: LLMClient, db
+) -> List[Dict[str, Any]]:
+    """Generate regex for single-field extraction."""
+    import re as _re
+    
+    target = intent.get("target", "") or "target data"
+    regex_examples = example_texts
+    
+    # For URL targets, extract actual URLs from snippet
+    if is_url_target and best_snippet:
+        url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
+        found_urls = _re.findall(url_pattern, best_snippet)
+        if found_urls:
+            regex_examples = list(dict.fromkeys(found_urls))[:5]
+            _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
+        regex_target_desc = f"{target} - extract href URL values from <a> tags"
+    else:
+        regex_target_desc = target
+
+    gen = regex_generation.iterative_regex_generation(
+        source=search_content,
+        examples=regex_examples,
+        target_desc=regex_target_desc,
+        llm=llm,
+        max_iterations=3,
+        snippet=snippet_to_use
+    )
+    
+    extracted_data = []
+    if gen.get("success"):
+        pattern = gen.get("final_pattern")
+        flags = gen.get("final_flags", "s")
+        matches = _apply_regex_matches(pattern, flags, search_content)
+        
+        if matches:
+            unique_matches = list(dict.fromkeys(matches))  # Dedupe
+            
+            # Filter base URL for URL targets
+            if is_url_target:
+                base_url = url.rstrip('/')
+                unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
+            
+            if unique_matches:
+                extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
+                db_utils.record_new_parser(
+                    db,
+                    task_id=task_id,
+                    url=url,
+                    intent=intent,
+                    pattern=pattern,
+                    flags=flags,
+                    matches_count=len(unique_matches),
+                    source_type="CONTENT",
+                    sample_input=best_snippet[:2000],
+                    sample_output=[{"text": m} for m in unique_matches[:5]]
+                )
+                _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
+    else:
+        _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
+    
+    return extracted_data
+
+
 @celery_app.task(name="scrape.process_request_full")
 def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
     """Entry point: Analyze intent and decide next steps."""
@@ -235,9 +471,6 @@ def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
         _log_event(task_id, "phase_start", phase="intent_extraction")
         intent = extract_intent(prompt, llm=llm)
         _log_event(task_id, "intent_extracted", target=intent.get("target"), keywords=intent.get("keywords"))
-
-        domain = urlparse(url).netloc
-        keywords = intent.get('keywords', [])
         
         celery_app.send_task(
             "scrape.fetch_page",
@@ -265,253 +498,72 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         started = datetime.fromisoformat(started_iso)
         completed = datetime.fromisoformat(completed_iso)
 
+        # Persist sources
         try:
-            db_utils.update_task_sources(
-                db,
-                task_id,
-                page_content=inner_text[:200000],
-                network_requests=network,
-                intent=intent,
-                started_at=started,
-            )
+            db_utils.update_task_sources(db, task_id, page_content=inner_text[:200000],
+                                         network_requests=network, intent=intent, started_at=started)
         except Exception as e:
             logger.warning(f"Failed to persist sources: {e}")
 
         llm = LLMClient.from_env()
         domain = urlparse(url).netloc
         keywords = intent.get("keywords", [])
-        
-        # Determine if target is URL-based (links, urls, hrefs)
         target = intent.get("target", "") or ""
-        target_lower = target.lower()
-        is_url_target = any(word in target_lower for word in ['link', 'url', 'href', 'uri'])
         
-        # Prepare content sources:
-        # - text_content: for finding examples (visible text like job titles)
-        # - html_search_content: for regex matching (contains hrefs for URL targets)
-        text_content = inner_text if len(inner_text) < 1000000 else inner_text[:1000000]
-        html_search_content = html_content if len(html_content) < 1000000 else html_content[:1000000] if html_content else text_content
+        # Detect target type and prepare content
+        target_type = _detect_target_type(target, keywords)
+        is_url_target = target_type["is_url_target"]
+        is_multi_field = target_type["is_multi_field"]
         
-        # For URL targets, we'll search in HTML; for text targets, in inner_text
-        search_content = html_search_content if is_url_target else text_content
+        content = _prepare_search_content(inner_text, html_content, is_url_target)
+        text_content = content["text_content"]
+        search_content = content["search_content"]
         
         # Check for cached parser
-        parsers = db_utils.find_cached_parser(db, domain, keywords=keywords)
-        used_parser = None
-        reuse_matches = []
-        used_cached = False
-        
-        for p in parsers:
-            patt, fl = _decompose_stored_regex(cast(str, p.generated_regex))
-            matches = _apply_regex_matches(patt, fl, search_content)
-            if matches:
-                used_parser = p
-                reuse_matches = matches
-                used_cached = True
-                break
+        cache_result = _check_cached_parser(db, domain, keywords, search_content)
+        used_parser = cache_result["used_parser"]
+        used_cached = cache_result["used_cached"]
         
         extracted_data = []
         
-        if reuse_matches:
-            extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in reuse_matches]
+        if cache_result["matches"]:
+            extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
         else:
             # UNIVERSAL REGEX PIPELINE
-            
-            # Step 1: Find Examples from inner_text (visible text like job titles)
-            # Detect if this is multi-field structured data (e.g., country + capital + population)
-            # Multi-field requests have 3+ distinct field-type keywords
-            is_multi_field = len(keywords) >= 3
-            
             _log_event(task_id, "step_1_find_examples", is_url_target=is_url_target, is_multi_field=is_multi_field)
-            example_texts = []
             
-            if is_url_target:
-                # For URL targets, keyword-based finder won't work well (e.g. "VP Quality" 
-                # doesn't contain "job"). Use LLM to find relevant text like job titles.
-                _log_event(task_id, "step_1_llm_for_url_target")
-                example_texts = _find_examples_via_llm(text_content, intent.get("target", "") or "target data", llm)
-            elif is_multi_field:
-                # For multi-field extraction (structured data), use LLM to find complete records
-                # Keyword matching only finds single lines, but we need full record blocks
-                _log_event(task_id, "step_1_llm_for_multi_field")
-                example_texts = _find_structured_examples_via_llm(text_content, target, keywords, llm)
-            else:
-                examples_found = find_target_examples(text_content, keywords=keywords, target=intent.get("target"), max_examples=5)
-                example_texts = [e["text"] for e in examples_found]
-            
-            if not example_texts:
-                _log_event(task_id, "step_1_fallback_llm_examples")
-                example_texts = _find_examples_via_llm(text_content, intent.get("target", "") or "target data", llm)
-
-            if not example_texts:
-                example_texts = keywords[:3]
-            
+            # Step 1: Find examples
+            example_texts = _find_examples_for_extraction(
+                task_id, text_content, intent, is_url_target, is_multi_field, keywords, llm
+            )
             _log_event(task_id, "examples_found", count=len(example_texts), samples=example_texts[:3])
             
-            # Step 2: Find candidate snippets containing examples
-            # For URL targets: search in HTML to find the surrounding markup with hrefs
-            # For text targets: search in inner_text
-            _log_event(task_id, "step_2_find_candidates", example_count=len(example_texts), using_html=is_url_target)
-            candidates = _find_candidates_in_content(search_content, example_texts)
-            
-            # Step 3: Disambiguate best snippet
-            best_snippet = ""
-            if candidates:
-                _log_event(task_id, "step_3_disambiguate", candidate_count=len(candidates))
-                best = _disambiguate_candidate(candidates, intent, llm)
-                best_snippet = best.get("snippet", "")
-            
-            if not best_snippet:
-                snip = extract_snippet_around_example(search_content, example_texts[0] if example_texts else "", max_chars=4000)
-                best_snippet = cast(str, snip.get("snippet", ""))
+            # Steps 2-3: Find best snippet
+            best_snippet = _find_best_snippet(task_id, search_content, example_texts, intent, llm, is_url_target)
             
             # Step 4: Generate Regex
             _log_event(task_id, "step_4_generate_regex")
-            
-            # Use a larger snippet for regex generation to ensure examples are visible
             snippet_to_use = best_snippet
             if len(search_content) > 10000 and len(best_snippet) < 4000:
-                missing_count = sum(1 for ex in example_texts if ex not in best_snippet)
-                if missing_count > 0:
+                if any(ex not in best_snippet for ex in example_texts):
                     snippet_to_use = search_content[:32000]
 
             if is_multi_field:
-                # MULTI-FIELD EXTRACTION: Generate separate regex for each field
-                _log_event(task_id, "multi_field_extraction", fields=keywords)
-                field_results = {}
-                
-                for field in keywords:
-                    # Find field-specific examples from the structured examples
-                    field_examples = []
-                    field_lower = field.lower()
-                    for ex in example_texts:
-                        # Extract the line containing this field from the structured example
-                        for line in ex.split('\n'):
-                            if field_lower in line.lower():
-                                # Get just the value part after the colon if present
-                                if ':' in line:
-                                    value = line.split(':', 1)[1].strip()
-                                    if value:
-                                        field_examples.append(value)
-                                else:
-                                    field_examples.append(line.strip())
-                                break
-                    
-                    if not field_examples:
-                        continue
-                    
-                    # Dedupe examples
-                    field_examples = list(dict.fromkeys(field_examples))[:3]
-                    _log_event(task_id, "field_examples", field=field, examples=field_examples)
-                    
-                    # Generate regex for this field
-                    gen = regex_generation.iterative_regex_generation(
-                        source=search_content,
-                        examples=field_examples,
-                        target_desc=f"{field} values",
-                        llm=llm,
-                        max_iterations=2,
-                        snippet=snippet_to_use
-                    )
-                    
-                    if gen.get("success"):
-                        pattern = gen.get("final_pattern")
-                        flags = gen.get("final_flags", "s")
-                        matches = _apply_regex_matches(pattern, flags, search_content)
-                        if matches:
-                            # Deduplicate
-                            unique = list(dict.fromkeys(matches))
-                            field_results[field] = unique
-                            _log_event(task_id, "field_regex_success", field=field, match_count=len(unique))
-                
-                # Combine field results into extracted_data
-                if field_results:
-                    # Create records by zipping field results (assumes same order)
-                    max_len = max(len(v) for v in field_results.values())
-                    for i in range(max_len):
-                        record = {}
-                        for field, values in field_results.items():
-                            if i < len(values):
-                                record[field] = values[i]
-                        if record:
-                            # Create text representation for API compatibility
-                            text_parts = [f"{k}: {v}" for k, v in record.items()]
-                            text_repr = " | ".join(text_parts)
-                            extracted_data.append({
-                                "text": text_repr,
-                                "fields": record, 
-                                "source": "multi_field_regex", 
-                                "confidence": 0.85
-                            })
-                    _log_event(task_id, "multi_field_success", record_count=len(extracted_data))
-            else:
-                # SINGLE-FIELD EXTRACTION
-                regex_examples = example_texts
-                if is_url_target and best_snippet:
-                    import re as _re
-                    url_pattern = r'href=["\']?(https?://[^"\'>\s]+)'
-                    found_urls = _re.findall(url_pattern, best_snippet)
-                    if found_urls:
-                        regex_examples = list(dict.fromkeys(found_urls))[:5]
-                        _log_event(task_id, "extracted_url_examples", urls=regex_examples[:3])
-                    regex_target_desc = f"{target} - extract href URL values from <a> tags"
-                else:
-                    regex_target_desc = intent.get("target") or "target data"
-
-                gen = regex_generation.iterative_regex_generation(
-                    source=search_content,
-                    examples=regex_examples,
-                    target_desc=regex_target_desc,
-                    llm=llm,
-                    max_iterations=3,
-                    snippet=snippet_to_use 
+                extracted_data = _run_multi_field_extraction(
+                    task_id, keywords, example_texts, search_content, snippet_to_use, llm
                 )
-                
-                if gen.get("success"):
-                    pattern = gen.get("final_pattern")
-                    flags = gen.get("final_flags", "s")
-                    matches = _apply_regex_matches(pattern, flags, search_content)
-                    if matches:
-                        seen = set()
-                        unique_matches = []
-                        for m in matches:
-                            if m not in seen:
-                                seen.add(m)
-                                unique_matches.append(m)
-                        
-                        if is_url_target:
-                            base_url = url.rstrip('/')
-                            unique_matches = [m for m in unique_matches if m.rstrip('/') != base_url]
-                        
-                        if unique_matches:
-                            extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
-                            db_utils.record_new_parser(
-                                db,
-                                task_id=task_id,
-                                url=url,
-                                intent=intent,
-                                pattern=pattern,
-                                flags=flags,
-                                matches_count=len(unique_matches),
-                                source_type="CONTENT",
-                                sample_input=best_snippet[:2000],
-                                sample_output=[{"text": m} for m in unique_matches[:5]]
-                            )
-                            _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
-                else:
-                    _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
+            else:
+                extracted_data = _run_single_field_extraction(
+                    task_id, url, intent, example_texts, search_content, 
+                    best_snippet, snippet_to_use, is_url_target, llm, db
+                )
 
         # Persist Results
         if extracted_data:
             db_utils.persist_extraction_result(
-                db, task_id, 
-                extracted_data=extracted_data, 
-                total_matches=len(extracted_data),
-                used_parser=used_parser,
-                processing_time_seconds=duration,
-                started_at=started,
-                completed_at=completed,
-                used_cached_parser=used_cached
+                db, task_id, extracted_data=extracted_data, total_matches=len(extracted_data),
+                used_parser=used_parser, processing_time_seconds=duration,
+                started_at=started, completed_at=completed, used_cached_parser=used_cached
             )
             _log_event(task_id, "success", match_count=len(extracted_data))
         else:
