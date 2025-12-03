@@ -45,7 +45,7 @@ _INTENT_SYSTEM_PROMPT = (
     "1. Output ONLY valid JSON.\n"
     "2. If a field is unknown or not present, use an empty list for arrays or an empty string for strings.\n"
     "3. confidence is a float 0..1 (use 0.5 if uncertain).\n"
-    "4. keywords should be lowercased single or multi-word tokens (no duplicates).\n"
+    "4. keywords should be specific phrases. Keep concepts together (e.g. 'job urls' instead of 'job', 'urls').\n"
     "5. constraints are specific filters (e.g., geography, price range, date window).\n"
     "6. output_shape is a concise description of the desired result form.\n"
     "7. target should be a short noun phrase (e.g., 'job links', 'product prices').\n"
@@ -71,7 +71,7 @@ _JSON_FALLBACK_TEMPLATE = {
 
 _JSON_EXAMPLE = (
     '{"target": "job links", "original_input": "find me senior python jobs", '
-    '"keywords": ["senior", "python", "jobs"], "constraints": [""], '
+    '"keywords": ["senior python jobs"], "constraints": [""], '
     '"output_shape": "list of job posting URLs", "confidence": 0.9, '
     '"source_type": "attribute", "target_attribute": "href"}'
 )
