@@ -718,7 +718,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         content = _prepare_search_content(inner_text, html_content)
         text_content = content["text_content"]
         search_content = content["search_content"]
-        
+
         # Check for cached parser (skip for attribute targets as they use different approach)
         cache_result = {"used_parser": None, "matches": [], "used_cached": False}
         if not is_attribute_target:
@@ -750,8 +750,21 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 extracted_data = _run_attribute_extraction(
                     task_id, url, intent, matched_texts, html_content, llm, db
                 )
-            else:
-                # Standard regex extraction path
+            
+            # FALLBACK: If attribute extraction found nothing (or wasn't attempted),
+            # assume the content is not standard HTML (e.g. JSON, XML) or the attribute approach failed.
+            # Switch to Universal Regex Generation (treating content as text).
+            if not extracted_data and not is_multi_field:
+                _log_event(task_id, "fallback_to_generic_regex")
+                
+                # If we previously looked for anchors (is_attribute_target=True), we need to re-run Step 2
+                # to find the ACTUAL values (e.g. the URLs themselves), not the anchors.
+                if is_attribute_target:
+                    matched_texts = _step2_find_matching_text(
+                        task_id, text_content, intent, is_multi_field, False, keywords, llm
+                    )
+                    _log_event(task_id, "step_2_retry_complete", count=len(matched_texts))
+
                 # Steps 3-4: Find text in raw content (no LLM) -> select best candidate via LLM
                 best_snippet = _steps3_4_find_and_select_snippet(
                     task_id, search_content, matched_texts, intent, llm
@@ -764,15 +777,15 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                     if any(ex not in best_snippet for ex in matched_texts):
                         snippet_to_use = search_content[:32000]
 
-                if is_multi_field:
-                    extracted_data = _run_multi_field_extraction(
-                        task_id, keywords, matched_texts, search_content, snippet_to_use, llm
-                    )
-                else:
-                    extracted_data = _run_single_field_extraction(
-                        task_id, url, intent, matched_texts, search_content, 
-                        best_snippet, snippet_to_use, llm, db
-                    )
+                extracted_data = _run_single_field_extraction(
+                    task_id, url, intent, matched_texts, search_content, 
+                    best_snippet, snippet_to_use, llm, db
+                )
+                
+            elif is_multi_field and not extracted_data:
+                 extracted_data = _run_multi_field_extraction(
+                    task_id, keywords, matched_texts, search_content, search_content[:32000], llm
+                )
 
         # Persist Results
         if extracted_data:

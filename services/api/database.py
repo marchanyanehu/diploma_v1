@@ -17,8 +17,21 @@ import os
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Helper to parse boolean env flags
+def _env_flag(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
+
 # Create settings instance
 settings = Settings()
+
+# Optional: mute SQLAlchemy engine logs and echo based on env flag
+MUTE_SQLALCHEMY_LOGGING = _env_flag("SQLALCHEMY_MUTE_LOGGING", False)
+if MUTE_SQLALCHEMY_LOGGING:
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+
+# Allow overriding echo via env; default to settings.debug unless muted
+SQLALCHEMY_ECHO = _env_flag("SQLALCHEMY_ECHO", settings.debug and not MUTE_SQLALCHEMY_LOGGING)
 
 # Construct database URL if not provided directly
 if os.getenv("TEST_SQLITE"):
@@ -37,7 +50,7 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # Verify connections before use
     pool_recycle=300,    # Recycle connections every 5 minutes
-    echo=settings.debug,  # Log SQL queries in debug mode
+    echo=SQLALCHEMY_ECHO,  # Log SQL queries when enabled
 )
 
 # Create SessionLocal class
