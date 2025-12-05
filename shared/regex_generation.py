@@ -164,11 +164,22 @@ def build_generation_messages(
         )
     else:
         # Standard text extraction
+        # Mark where examples appear in the snippet for clarity
+        marked_snippet = snippet[:32000]
+        for ex in examples:
+            if ex and ex in marked_snippet:
+                marked_snippet = marked_snippet.replace(ex, f"[[EXAMPLE→]]{ex}[[←EXAMPLE]]", 1)
+        
         user = (
             f"TARGET: {target_desc}\n\n"
-            f"EXAMPLES (the regex MUST match each of these exactly):\n{_examples_block(examples)}\n\n"
-            f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
-            f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
+            f"EXAMPLES (the regex MUST capture each of these exactly as shown):\n{_examples_block(examples)}\n\n"
+            f"CONTENT SNIPPET (examples are marked with [[EXAMPLE→]]...[[←EXAMPLE]]):\n"
+            f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
+            f"INSTRUCTIONS:\n"
+            f"1. Find the [[EXAMPLE→]]...[[←EXAMPLE]] markers in the snippet.\n"
+            f"2. Look at the HTML tags/classes IMMEDIATELY before each marker - that's your anchor.\n"
+            f"3. Build a regex using THOSE specific tags/classes to capture text in that position.\n"
+            f"4. Do NOT use other classes from elsewhere in the snippet.\n\n"
             f"{_GENERATION_RULES}"
         )
         
@@ -221,7 +232,150 @@ def build_refinement_messages(
         {"role": "user", "content": instruction},
     ]
 
-# ... (rest of validation code) ...
+def validate_regex(
+    pattern: str,
+    source: str,
+    examples: Sequence[str],
+    *,
+    flags: str = "",
+    max_matches: int = 200
+) -> Dict[str, Any]:
+    """Validate a regex pattern against source content and examples.
+    
+    Returns a dict with:
+      success: bool
+      matches: list[str] (all matches found)
+      issues: list[str] (reasons for failure)
+      error: str (if regex invalid)
+      missing_examples: list[str] (examples not found)
+    """
+    import re
+    
+    result = {
+        "success": False,
+        "matches": [],
+        "issues": [],
+        "error": None,
+        "missing_examples": [],
+        "pattern": pattern
+    }
+    
+    # 1. Basic Safety Checks
+    if not pattern or len(pattern) > 500:
+        result["issues"].append("Pattern empty or too long (>500 chars)")
+        return result
+        
+    # 2. Compile Regex
+    re_flags = 0
+    if 'i' in flags: re_flags |= re.IGNORECASE
+    if 'm' in flags: re_flags |= re.MULTILINE
+    if 's' in flags: re_flags |= re.DOTALL
+    
+    try:
+        rx = re.compile(pattern, re_flags)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+        
+    # 3. Run Matches (with safety limits)
+    matches = []
+    try:
+        # Use finditer to avoid massive list allocation if too many matches
+        for i, m in enumerate(rx.finditer(source)):
+            if i >= max_matches:
+                result["issues"].append(f"Too many matches (capped at {max_matches})")
+                break
+                
+            # Prefer capturing group 1 if present, else whole match
+            if m.lastindex and m.lastindex >= 1:
+                matches.append(m.group(1))
+            else:
+                matches.append(m.group(0))
+    except Exception as e:
+        result["error"] = f"Runtime match error: {str(e)}"
+        return result
+        
+    result["matches"] = matches
+    
+    # 4. Check Constraints
+    if not matches:
+        result["issues"].append("No matches found in source")
+        return result
+        
+    # Check average length (avoid matching huge blocks)
+    avg_len = sum(len(m) for m in matches) / len(matches)
+    if avg_len > 2000:
+        result["issues"].append(f"Average match length too high ({int(avg_len)} chars)")
+    if avg_len < 2:
+        result["issues"].append(f"Average match length too low ({int(avg_len)} chars)")
+        
+    # Check duplicates (if mostly duplicates, it's likely too broad like matching " " or ",")
+    unique_matches = set(matches)
+    if len(matches) > 10 and len(unique_matches) < len(matches) * 0.2:
+         result["issues"].append("High duplication rate (likely too generic)")
+
+    # 5. Verify Examples
+    # All provided examples MUST be present in the matches
+    # We normalize for comparison if case-insensitive flag is set
+    # Note: Examples might be substrings of the full match or exact matches.
+    # The prompt usually asks for exact matches.
+    
+    missing = []
+    # Optimization: use set for fast lookups
+    match_set = set(matches)
+    if 'i' in flags:
+        match_set = {m.lower() for m in matches}
+        
+    for ex in examples:
+        if not ex: continue
+        check_ex = ex if 'i' not in flags else ex.lower()
+        
+        # We check if the example is in the set of matches
+        # If exact match required:
+        if check_ex not in match_set:
+            # Fallback: maybe it's a substring? 
+            # Actually, for rigorous extraction, we want the regex to capture the exact value.
+            # But sometimes whitespace differs.
+            # Let's check if it's present as a substring in any match (looser)
+            # Or strict? Let's be strict first.
+            missing.append(ex)
+            
+    if missing:
+        result["missing_examples"] = missing
+        result["issues"].append(f"Failed to match {len(missing)}/{len(examples)} provided examples")
+    
+    # 6. Check precision - if we match WAY more than examples, pattern is too broad
+    # Allow up to 10x the example count as reasonable, but flag more
+    if len(examples) > 0 and len(unique_matches) > len(examples) * 10:
+        result["issues"].append(f"Pattern too broad: {len(unique_matches)} matches for {len(examples)} examples")
+        
+    # Final Success Determination
+    if not result["issues"] and not result["error"]:
+        result["success"] = True
+        
+    return result
+
+def _extract_json(raw: str) -> Dict[str, Any]:
+    """Safe JSON extraction from LLM output."""
+    import re
+    text = raw.strip()
+    # Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+        
+    # Try finding { ... } block
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+            
+    # Fallback
+    return {}
+
 
 def iterative_regex_generation(
     source: str,
@@ -243,7 +397,17 @@ def iterative_regex_generation(
     gen_messages = build_generation_messages(
         snippet_used, examples, target_desc=target_desc, is_attribute_extraction=is_attribute_extraction
     )
-    raw = llm.chat(gen_messages, temperature=0.2)
+    try:
+        raw = llm.chat(gen_messages, temperature=0.2)
+    except Exception as exc:
+        attempts.append({"stage": "initial_error", "error": str(exc)})
+        return {
+            "success": False,
+            "error": f"llm_chat_failed_initial: {exc}",
+            "attempts": attempts,
+            "final_pattern": None,
+            "final_flags": None,
+        }
     parsed = _extract_json(raw)
     pattern = str(parsed.get("regex", ""))
     # Default to DOTALL flag if not specified
@@ -283,10 +447,22 @@ def iterative_regex_generation(
             prev, failures, snippet_used, examples, 
             target_desc=target_desc, is_attribute_extraction=is_attribute_extraction
         )
-        raw_ref = llm.chat(ref_messages, temperature=0.15)
+        try:
+            raw_ref = llm.chat(ref_messages, temperature=0.15)
+        except Exception as exc:
+            attempts.append({"stage": f"refinement_{iteration}_error", "error": str(exc)})
+            return {
+                "success": False,
+                "error": f"llm_chat_failed_refinement: {exc}",
+                "attempts": attempts,
+                "final_pattern": None,
+                "final_flags": None,
+            }
         parsed_ref = _extract_json(raw_ref)
         pattern_ref = str(parsed_ref.get("regex", ""))
-        flags_ref = str(parsed_ref.get("flags", ""))
+        flags_ref = str(parsed_ref.get("flags", "s"))
+        if "s" not in flags_ref.lower():
+            flags_ref = flags_ref + "s"
         val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref)
         
         if is_attribute_extraction and val_ref["matches"] and not val_ref.get("error"):

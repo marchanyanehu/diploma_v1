@@ -52,8 +52,14 @@ def _log_event(task_id: str, event: str, **fields) -> None:
     except Exception:
         logger.info("%s %s", event, fields)
 
-def _extract_snippet(content: str, idx: int, example_len: int, context: int = 300) -> str:
-    """Extract a snippet from content around a given index."""
+def _extract_snippet(content: str, idx: int, example_len: int, context: int = 1000) -> str:
+    """Extract a snippet from content around a given index with enough context."""
+    s_start = max(0, idx - context)
+    s_end = min(len(content), idx + example_len + context)
+    return content[s_start:s_end]
+
+def _extract_micro_snippet(content: str, idx: int, example_len: int, context: int = 150) -> str:
+    """Extract a tiny snippet for debugging - just immediate HTML around example."""
     s_start = max(0, idx - context)
     s_end = min(len(content), idx + example_len + context)
     return content[s_start:s_end]
@@ -224,8 +230,16 @@ def _find_text_in_raw_content(raw_content: str, text_examples: List[str], max_ca
                 break
             
             snippet = _extract_snippet(raw_content, idx, len(ex))
+            micro = _extract_micro_snippet(raw_content, idx, len(ex))
+            logger.info(f"MICRO_SNIPPET for '{ex[:30]}': {repr(micro)}")
+            
             if snippet not in seen_snippets:
-                candidates.append({"example_match": ex, "snippet": snippet, "offset": idx})
+                candidates.append({
+                    "example_match": ex, 
+                    "snippet": snippet, 
+                    "micro_snippet": micro,  # Store the micro-snippet too
+                    "offset": idx
+                })
                 seen_snippets.add(snippet)
             
             start = idx + 1
@@ -443,7 +457,7 @@ def _step2_find_matching_text(
 def _steps3_4_find_and_select_snippet(
     task_id: str, raw_content: str, matched_texts: List[str], 
     intent: Dict, llm: LLMClient
-) -> str:
+) -> Dict[str, str]:
     """Steps 3-4: Find text in raw content (no LLM), then select best candidate via LLM.
     
     Step 3: Find matched_texts in raw content using string search (no LLM)
@@ -457,7 +471,7 @@ def _steps3_4_find_and_select_snippet(
         llm: LLM client for step 4 disambiguation
         
     Returns:
-        Best snippet for regex generation
+        Dict with 'snippet' (large) and 'micro_snippets' (focused HTML for regex gen)
     """
     # Step 3: Find text in raw content (no LLM, pure string search)
     _log_event(task_id, "step_3_find_in_raw_content", text_count=len(matched_texts))
@@ -465,35 +479,63 @@ def _steps3_4_find_and_select_snippet(
     _log_event(task_id, "step_3_candidates_found", candidate_count=len(candidates))
     
     best_snippet = ""
+    micro_snippets = ""
+    
     if candidates:
         # Step 4: Provide snippets to LLM, select best candidate
         _log_event(task_id, "step_4_select_best_candidate", candidate_count=len(candidates))
         best = _select_best_candidate_via_llm(candidates, intent, llm)
         best_snippet = best.get("snippet", "")
+        
+        # Combine all micro-snippets for focused regex generation
+        micros = [c.get("micro_snippet", "") for c in candidates if c.get("micro_snippet")]
+        micro_snippets = "\n---\n".join(micros[:5])
     
     # Fallback: extract snippet around first matched text
     if not best_snippet:
         snip = extract_snippet_around_example(raw_content, matched_texts[0] if matched_texts else "", max_chars=4000)
         best_snippet = cast(str, snip.get("snippet", ""))
     
-    return best_snippet
+    return {"snippet": best_snippet, "micro_snippets": micro_snippets}
 
 
 def _extract_field_examples(example_texts: List[str], field: str) -> List[str]:
-    """Extract field-specific examples from structured examples."""
+    """Extract field-specific examples from structured examples.
+    
+    Handles various formats:
+    - "Field: Value" lines where field name matches
+    - First line of record (for primary entity like country name)
+    - Flexible matching (e.g., "capitals" matches "Capital:")
+    """
     field_examples = []
-    field_lower = field.lower()
+    field_lower = field.lower().rstrip('s')  # Remove trailing 's' for flexible matching
     
     for ex in example_texts:
-        for line in ex.split('\n'):
-            if field_lower in line.lower():
+        lines = ex.strip().split('\n')
+        found = False
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            # Flexible match: "capitals" matches "capital", "country names" matches "country"
+            if field_lower in line_lower or field.lower() in line_lower:
                 if ':' in line:
                     value = line.split(':', 1)[1].strip()
                     if value:
                         field_examples.append(value)
+                        found = True
                 else:
                     field_examples.append(line.strip())
+                    found = True
                 break
+        
+        # If field is about names/entities and not found, assume first line is the entity name
+        if not found and lines:
+            name_keywords = ['name', 'title', 'country', 'city', 'company', 'product', 'item']
+            if any(kw in field_lower for kw in name_keywords):
+                # First line is often the entity name (no colon)
+                first_line = lines[0].strip()
+                if first_line and ':' not in first_line:
+                    field_examples.append(first_line)
     
     return list(dict.fromkeys(field_examples))[:3]  # Dedupe and limit
 
@@ -530,6 +572,10 @@ def _run_multi_field_extraction(
                 unique = list(dict.fromkeys(matches))
                 field_results[field] = unique
                 _log_event(task_id, "field_regex_success", field=field, match_count=len(unique))
+            else:
+                _log_event(task_id, "field_regex_no_matches", field=field, pattern=pattern)
+        else:
+            _log_event(task_id, "field_regex_failed", field=field, error=gen.get("error"))
     
     # Combine field results into records
     extracted_data = []
@@ -613,6 +659,16 @@ def _run_single_field_extraction(
         snippet=snippet_to_use
     )
     
+    # Log detailed attempt info for debugging
+    for i, att in enumerate(gen.get("attempts", [])):
+        val = att.get("validation", {})
+        _log_event(task_id, f"regex_attempt_{i}", 
+                   pattern=str(att.get("parsed", {}).get("regex", ""))[:100],
+                   matches_count=len(val.get("matches", [])),
+                   match_samples=val.get("matches", [])[:3],
+                   issues=val.get("issues", []),
+                   missing=val.get("missing_examples", []))
+    
     extracted_data = []
     if gen.get("success"):
         pattern = gen.get("final_pattern")
@@ -639,6 +695,12 @@ def _run_single_field_extraction(
                 _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
     else:
         _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
+        
+        # FALLBACK: If regex generation failed but we found examples in the content,
+        # use the LLM-identified examples directly since they were verified to exist
+        if example_texts and all(ex in search_content for ex in example_texts):
+            _log_event(task_id, "fallback_to_llm_examples", count=len(example_texts))
+            extracted_data = [{"text": ex, "source": "llm_examples", "confidence": 0.8} for ex in example_texts]
     
     return extracted_data
 
@@ -766,16 +828,22 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                     _log_event(task_id, "step_2_retry_complete", count=len(matched_texts))
 
                 # Steps 3-4: Find text in raw content (no LLM) -> select best candidate via LLM
-                best_snippet = _steps3_4_find_and_select_snippet(
+                snippet_result = _steps3_4_find_and_select_snippet(
                     task_id, search_content, matched_texts, intent, llm
                 )
+                best_snippet = snippet_result.get("snippet", "")
+                micro_snippets = snippet_result.get("micro_snippets", "")
                 
-                # Step 5: Generate regex on the best snippet
-                _log_event(task_id, "step_5_generate_regex")
-                snippet_to_use = best_snippet
-                if len(search_content) > 10000 and len(best_snippet) < 4000:
-                    if any(ex not in best_snippet for ex in matched_texts):
-                        snippet_to_use = search_content[:32000]
+                # Step 5: Generate regex - use micro_snippets (focused HTML) if available
+                _log_event(task_id, "step_5_generate_regex", 
+                           snippet_len=len(best_snippet),
+                           micro_len=len(micro_snippets),
+                           micro_preview=micro_snippets[:300] if micro_snippets else "")
+                
+                # Prefer micro_snippets for regex gen (cleaner, focused HTML)
+                snippet_to_use = micro_snippets if micro_snippets else best_snippet
+                if not snippet_to_use or len(snippet_to_use) < 50:
+                    snippet_to_use = best_snippet if best_snippet else search_content[:32000]
 
                 extracted_data = _run_single_field_extraction(
                     task_id, url, intent, matched_texts, search_content, 
