@@ -44,9 +44,9 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-diploma_db}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      DB_NAME: ${DB_NAME:-diploma_db}
+      DB_USER: ${DB_USER:-app_write}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
@@ -79,9 +79,9 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-diploma_db}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      DB_NAME: ${DB_NAME:-diploma_db}
+      DB_USER: ${DB_USER:-app_write}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
       PLAYWRIGHT_NAV_TIMEOUT_MS: ${PLAYWRIGHT_NAV_TIMEOUT_MS:-30000}
       PLAYWRIGHT_SETTLE_DELAY_MS: ${PLAYWRIGHT_SETTLE_DELAY_MS:-500}
@@ -113,11 +113,12 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-diploma_db}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      DB_NAME: ${DB_NAME:-diploma_db}
+      DB_USER: ${DB_USER:-app_write}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      LLM_REQUEST_TIMEOUT_S: ${LLM_REQUEST_TIMEOUT_S:-60}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -144,9 +145,9 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-diploma_db}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      DB_NAME: ${DB_NAME:-diploma_db}
+      DB_USER: ${DB_USER:-app_write}
+      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
     depends_on:
       redis:
         condition: service_healthy
