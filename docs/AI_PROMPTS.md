@@ -16,6 +16,8 @@ Rules:
 7. target should be a short noun phrase (e.g., 'job links', 'product prices').
 ```
 
+Used by `services/ai_worker/tasks.py` during `process_request_full` to decide target, keywords, schema_fields, and attribute targets.
+
 ## Source Disambiguation
 
 **Prompt**:
@@ -58,4 +60,9 @@ BASE RULES:
 3. Prefer explicit character classes.
 ...
 ```
+
+Notes:
+- Responses must be valid JSON (no code fences); the worker parses them directly.
+- Regex results are cached in `ParserCache` for reuse on the same domain/keywords.
+- Attribute/URL extraction flows reuse the same JSON-only contract.
 
