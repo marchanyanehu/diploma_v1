@@ -117,6 +117,10 @@ class ExtractedData(BaseModel):
     text: str = Field(
         description="The extracted text content"
     )
+    fields: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured field values for schema-based extraction (e.g., job_title, city, etc.)"
+    )
     source: Optional[str] = Field(
         default=None,
         description="Source information (HTML element, JSON path, etc.)"

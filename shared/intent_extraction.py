@@ -45,17 +45,18 @@ _INTENT_SYSTEM_PROMPT = (
     "1. Output ONLY valid JSON.\n"
     "2. If a field is unknown or not present, use an empty list for arrays or an empty string for strings.\n"
     "3. confidence is a float 0..1 (use 0.5 if uncertain).\n"
-    "4. keywords should be specific phrases. Keep concepts together (e.g. 'job urls' instead of 'job', 'urls').\n"
+    "4. keywords should be individual field names/phrases to extract. If user lists fields like 'job_title, country, city', split them into ['job_title', 'country', 'city'].\n"
     "5. constraints are specific filters (e.g., geography, price range, date window).\n"
     "6. output_shape is a concise description of the desired result form.\n"
-    "7. target should be a short noun phrase (e.g., 'job links', 'product prices').\n"
-    "8. source_type should be 'text' or 'attribute'. Use 'attribute' if the user wants URLs, links, images, IDs, or other data typically found in HTML attributes.\n"
-    "9. target_attribute should be the attribute name (e.g., 'href', 'src', 'data-id') if source_type is 'attribute', otherwise null."
+    "7. target should be a short noun phrase (e.g., 'job details', 'product info').\n"
+    "8. source_type should be 'text' or 'attribute'. Use 'attribute' if the user wants URLs, links, images, IDs.\n"
+    "9. target_attribute should be the attribute name (e.g., 'href', 'src', 'data-id') if source_type is 'attribute', otherwise null.\n"
+    "10. schema_fields: If user provides specific field names (like 'job_title, country, city'), extract them as a list. These are the exact field names for the output JSON."
 )
 
 _INTENT_USER_TEMPLATE = (
     "USER_REQUEST:\n{user_input}\n\n"
-    "Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence, source_type, target_attribute"
+    "Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence, source_type, target_attribute, schema_fields"
 )
 
 _JSON_FALLBACK_TEMPLATE = {
@@ -67,13 +68,15 @@ _JSON_FALLBACK_TEMPLATE = {
     "confidence": 0.0,
     "source_type": "text",
     "target_attribute": None,
+    "schema_fields": [],
 }
 
 _JSON_EXAMPLE = (
-    '{"target": "job links", "original_input": "find me senior python jobs", '
-    '"keywords": ["senior python jobs"], "constraints": [""], '
-    '"output_shape": "list of job posting URLs", "confidence": 0.9, '
-    '"source_type": "attribute", "target_attribute": "href"}'
+    '{"target": "job details", "original_input": "job_title, country, city, state, apply_url", '
+    '"keywords": ["job_title", "country", "city", "state", "apply_url"], "constraints": [], '
+    '"output_shape": "structured JSON with named fields", "confidence": 0.95, '
+    '"source_type": "text", "target_attribute": null, '
+    '"schema_fields": ["job_title", "country", "city", "state", "apply_url"]}'
 )
 
 _DEFENSIVE_JSON_REGEX = re.compile(r"\{.*\}", re.DOTALL)
@@ -126,15 +129,27 @@ def _dedupe_lower(seq: List[str]) -> List[str]:
 
 
 def _coerce_schema(data: Dict[str, Any], original: str) -> Dict[str, Any]:
+    # Extract schema_fields - these are the exact field names for output
+    schema_fields = [str(x).strip() for x in data.get("schema_fields", []) if x][:20]
+    
+    # If no schema_fields but keywords look like field names (snake_case or single words), use them
+    keywords = _dedupe_lower([str(x) for x in data.get("keywords", [])][:30])
+    if not schema_fields and keywords:
+        # Check if keywords look like field names (contain _ or are single technical words)
+        potential_fields = [k for k in keywords if '_' in k or k in ['country', 'city', 'state', 'title', 'url', 'name', 'price', 'description']]
+        if len(potential_fields) >= 2:
+            schema_fields = potential_fields
+    
     return {
         "target": str(data.get("target", ""))[:100].strip(),
         "original_input": original,
-        "keywords": _dedupe_lower([str(x) for x in data.get("keywords", [])][:30]),
+        "keywords": keywords,
         "constraints": [str(x).strip() for x in data.get("constraints", [])][:30],
         "output_shape": str(data.get("output_shape", ""))[:120].strip(),
         "confidence": _safe_confidence(data.get("confidence", 0.0)),
         "source_type": str(data.get("source_type", "text")).lower(),
         "target_attribute": str(data.get("target_attribute", "") or "") or None,
+        "schema_fields": schema_fields,
     }
 
 

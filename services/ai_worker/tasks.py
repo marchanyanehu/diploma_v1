@@ -20,6 +20,24 @@ from shared import metrics
 
 logger = logging.getLogger(__name__)
 
+def _strip_html_to_text(html: str) -> str:
+    """Strip HTML tags and normalize whitespace to get clean text."""
+    import re as _re
+    # Remove HTML tags
+    text = _re.sub(r'<[^>]+>', ' ', html)
+    # Decode common HTML entities
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    # Normalize whitespace
+    text = _re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def _looks_like_html(text: str) -> bool:
+    """Check if text contains significant HTML tags."""
+    import re as _re
+    # Count HTML tags
+    tag_count = len(_re.findall(r'<[a-zA-Z][^>]*>', text))
+    return tag_count >= 2  # At least 2 tags suggests HTML content
+
 def _decompose_stored_regex(stored: str) -> tuple[str, str]:
     import re as _re
     m = _re.match(r"\(\?([ims]+):(.*)\)$", stored)
@@ -80,13 +98,16 @@ def _filter_values_via_llm(values: List[str], target: str, llm: LLMClient) -> Li
     
     prompt = (
         f"I am extracting '{target}' from a webpage.\n"
-        f"I found the following candidate values (e.g. URLs, sources, text).\n"
-        f"Please filter out any values that clearly DO NOT match the target '{target}'\n"
-        f"(e.g. if looking for job posts, remove image URLs, javascript links, or navigation links).\n"
-        f"If looking for images, keep image URLs.\n\n"
+        f"I found the following candidate URLs/values.\n\n"
+        f"FILTER RULES:\n"
+        f"- Keep ONLY values that are specific '{target}' (e.g. individual job posting URLs)\n"
+        f"- REMOVE generic navigation links (e.g. '/careers/', '/jobs/', '/about/')\n"
+        f"- REMOVE image URLs, javascript links, CSS files\n"
+        f"- REMOVE social media share links\n"
+        f"- For job URLs: keep URLs with specific job IDs/slugs, remove generic listing pages\n\n"
         f"CANDIDATES: {chunk}\n\n"
         f"Return ONLY a JSON object: {{\"valid_values\": [\"val1\", \"val2\"]}}\n"
-        f"Return ALL valid values from the list."
+        f"Return only the values that are specific '{target}', not navigation links."
     )
     
     try:
@@ -223,27 +244,48 @@ def _find_text_in_raw_content(raw_content: str, text_examples: List[str], max_ca
         if not ex or len(ex) < 3:
             continue
         
-        start = 0
-        while len(candidates) <= max_candidates:
-            idx = raw_content.find(ex, start)
-            if idx == -1:
-                break
+        # Try multiple search strategies for multi-line text
+        search_terms = [ex]  # Full text first
+        
+        # If example has newlines, also try first line and significant chunks
+        if '\n' in ex:
+            lines = [l.strip() for l in ex.split('\n') if l.strip() and len(l.strip()) > 5]
+            if lines:
+                search_terms.append(lines[0])  # First line
+                # Also try first 2-3 significant words from first line
+                words = lines[0].split()
+                if len(words) >= 2:
+                    search_terms.append(' '.join(words[:3]))
+        
+        for search_term in search_terms:
+            if not search_term or len(search_term) < 3:
+                continue
+                
+            start = 0
+            while len(candidates) <= max_candidates:
+                idx = raw_content.find(search_term, start)
+                if idx == -1:
+                    break
+                
+                snippet = _extract_snippet(raw_content, idx, len(search_term))
+                micro = _extract_micro_snippet(raw_content, idx, len(search_term))
+                logger.info(f"MICRO_SNIPPET for '{search_term[:30]}': {repr(micro)}")
+                
+                if snippet not in seen_snippets:
+                    candidates.append({
+                        "example_match": search_term, 
+                        "snippet": snippet, 
+                        "micro_snippet": micro,  # Store the micro-snippet too
+                        "offset": idx
+                    })
+                    seen_snippets.add(snippet)
+                
+                start = idx + 1
+                if len(candidates) > 10:
+                    break
             
-            snippet = _extract_snippet(raw_content, idx, len(ex))
-            micro = _extract_micro_snippet(raw_content, idx, len(ex))
-            logger.info(f"MICRO_SNIPPET for '{ex[:30]}': {repr(micro)}")
-            
-            if snippet not in seen_snippets:
-                candidates.append({
-                    "example_match": ex, 
-                    "snippet": snippet, 
-                    "micro_snippet": micro,  # Store the micro-snippet too
-                    "offset": idx
-                })
-                seen_snippets.add(snippet)
-            
-            start = idx + 1
-            if len(candidates) > 10:
+            # If we found candidates with this term, stop trying alternatives
+            if candidates:
                 break
         
         if len(candidates) > max_candidates:
@@ -503,20 +545,42 @@ def _extract_field_examples(example_texts: List[str], field: str) -> List[str]:
     """Extract field-specific examples from structured examples.
     
     Handles various formats:
-    - "Field: Value" lines where field name matches
+    - JSON: {"field": value, ...} or {"field":"value", ...}
+    - Text: "Field: Value" lines
     - First line of record (for primary entity like country name)
-    - Flexible matching (e.g., "capitals" matches "Capital:")
     """
+    import re as _re
     field_examples = []
     field_lower = field.lower().rstrip('s')  # Remove trailing 's' for flexible matching
     
     for ex in example_texts:
-        lines = ex.strip().split('\n')
         found = False
         
-        for i, line in enumerate(lines):
+        # Try JSON extraction first (handles {"id": 123, ...} format)
+        # Match "field": value or "field":"value"
+        json_patterns = [
+            rf'"{field_lower}"\s*:\s*"([^"]*)"',  # String value: "field": "value"
+            rf'"{field_lower}"\s*:\s*(\d+)',       # Number value: "field": 123
+            rf'"{field}"\s*:\s*"([^"]*)"',         # Exact field name string
+            rf'"{field}"\s*:\s*(\d+)',             # Exact field name number
+        ]
+        
+        for pattern in json_patterns:
+            match = _re.search(pattern, ex, _re.IGNORECASE)
+            if match:
+                value = match.group(1)
+                if value:
+                    field_examples.append(value)
+                    found = True
+                    break
+        
+        if found:
+            continue
+            
+        # Fallback to text format (Field: Value on separate lines)
+        lines = ex.strip().split('\n')
+        for line in lines:
             line_lower = line.lower()
-            # Flexible match: "capitals" matches "capital", "country names" matches "country"
             if field_lower in line_lower or field.lower() in line_lower:
                 if ':' in line:
                     value = line.split(':', 1)[1].strip()
@@ -532,7 +596,6 @@ def _extract_field_examples(example_texts: List[str], field: str) -> List[str]:
         if not found and lines:
             name_keywords = ['name', 'title', 'country', 'city', 'company', 'product', 'item']
             if any(kw in field_lower for kw in name_keywords):
-                # First line is often the entity name (no colon)
                 first_line = lines[0].strip()
                 if first_line and ':' not in first_line:
                     field_examples.append(first_line)
@@ -594,6 +657,88 @@ def _run_multi_field_extraction(
         _log_event(task_id, "multi_field_success", record_count=len(extracted_data))
     
     return extracted_data
+
+
+def _run_schema_extraction(
+    task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
+) -> List[Dict[str, Any]]:
+    """Extract data according to schema fields using LLM + regex.
+    
+    This is designed for structured extraction like:
+    - job_title, country, city, state, apply_url
+    
+    Returns a single record with all fields populated.
+    """
+    _log_event(task_id, "schema_extraction_start", fields=schema_fields)
+    
+    # Step 1: Use LLM to identify field values from inner_text
+    fields_list = ", ".join(schema_fields)
+    prompt = f"""Extract the following fields from the page content:
+FIELDS TO EXTRACT: {fields_list}
+
+PAGE CONTENT:
+{inner_text[:15000]}
+
+INSTRUCTIONS:
+1. For each field, find the EXACT value from the page content.
+2. If a field has multiple parts (like "Denver, CO"), split them appropriately (city="Denver", state="CO").
+3. For URL fields (like apply_url), look for "Apply" buttons or similar.
+4. If a field is not found, use empty string.
+5. Return ONLY a JSON object with the field names as keys.
+
+Example output format:
+{{"job_title": "Software Engineer", "country": "United States", "city": "New York", "state": "NY", "apply_url": "https://..."}}
+
+Return ONLY the JSON object, no other text."""
+
+    try:
+        messages = [
+            {"role": "system", "content": "You are a data extraction assistant. Extract structured data from web page content. Output ONLY valid JSON."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        raw_response = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
+        _log_event(task_id, "schema_llm_response", response=raw_response[:500])
+        
+        # Parse the JSON response
+        import re
+        json_match = re.search(r'\{[^{}]*\}', raw_response, re.DOTALL)
+        if json_match:
+            field_values = _json.loads(json_match.group(0))
+        else:
+            field_values = _json.loads(raw_response)
+        
+        _log_event(task_id, "schema_fields_extracted", values=field_values)
+        
+        # Step 2: For URL fields, extract from HTML if not found in text
+        for field in schema_fields:
+            if 'url' in field.lower() and (not field_values.get(field) or field_values.get(field) == ""):
+                # Try to find apply/action URLs in HTML
+                apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
+                apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
+                if apply_matches:
+                    # Prefer full URLs
+                    full_urls = [u for u in apply_matches if u.startswith('http')]
+                    field_values[field] = full_urls[0] if full_urls else apply_matches[0]
+                    _log_event(task_id, "schema_url_extracted", field=field, value=field_values[field])
+        
+        # Build result record
+        if field_values:
+            text_repr = " | ".join(f"{k}: {v}" for k, v in field_values.items() if v)
+            result = {
+                "text": text_repr,
+                "fields": field_values,
+                "source": "schema_extraction",
+                "confidence": 0.9
+            }
+            _log_event(task_id, "schema_extraction_success", fields=list(field_values.keys()))
+            return [result]
+            
+    except Exception as e:
+        _log_event(task_id, "schema_extraction_failed", error=str(e))
+        logger.exception("Schema extraction failed")
+    
+    return []
 
 
 def _run_attribute_extraction(
@@ -676,7 +821,17 @@ def _run_single_field_extraction(
         matches = _apply_regex_matches(pattern, flags, search_content)
         
         if matches:
-            unique_matches = list(dict.fromkeys(matches))  # Dedupe
+            # Post-process: if matches contain HTML, strip to text
+            processed_matches = []
+            for m in matches:
+                if _looks_like_html(m):
+                    clean_text = _strip_html_to_text(m)
+                    if clean_text and len(clean_text) > 3:  # Skip empty/trivial
+                        processed_matches.append(clean_text)
+                else:
+                    processed_matches.append(m)
+            
+            unique_matches = list(dict.fromkeys(processed_matches))  # Dedupe
             
             if unique_matches:
                 extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
@@ -698,9 +853,20 @@ def _run_single_field_extraction(
         
         # FALLBACK: If regex generation failed but we found examples in the content,
         # use the LLM-identified examples directly since they were verified to exist
-        if example_texts and all(ex in search_content for ex in example_texts):
-            _log_event(task_id, "fallback_to_llm_examples", count=len(example_texts))
-            extracted_data = [{"text": ex, "source": "llm_examples", "confidence": 0.8} for ex in example_texts]
+        # Use ANY match (not ALL) since long text examples might be truncated
+        if example_texts:
+            found_examples = []
+            for ex in example_texts:
+                # For multi-line examples, check if first line is in content
+                if ex in search_content:
+                    found_examples.append(ex)
+                elif '\n' in ex:
+                    first_line = ex.split('\n')[0].strip()
+                    if first_line and len(first_line) > 5 and first_line in search_content:
+                        found_examples.append(ex)  # Keep full example text
+            if found_examples:
+                _log_event(task_id, "fallback_to_llm_examples", count=len(found_examples))
+                extracted_data = [{"text": ex, "source": "llm_examples", "confidence": 0.8} for ex in found_examples]
     
     return extracted_data
 
@@ -762,7 +928,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         llm = LLMClient.from_env()
         domain = urlparse(url).netloc
         keywords = intent.get("keywords", [])
-        target = intent.get("target", "")
+        schema_fields = intent.get("schema_fields", [])
         
         # Detect target type and prepare content
         # We rely on the intent extractor to tell us if this is an attribute extraction
@@ -771,11 +937,19 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # Fallback: if source_type is attribute but no attribute specified, default to href (most common)
         if is_attribute_target and not target_attribute:
             target_attribute = "href"
-            
-        # Also detect multi-field
-        is_multi_field = len(keywords) >= 3 and not is_attribute_target
         
-        _log_event(task_id, "target_type_detected", is_multi_field=is_multi_field, is_attribute_target=is_attribute_target, target_attribute=target_attribute)
+        # Schema-based extraction takes priority
+        is_schema_extraction = len(schema_fields) >= 2
+        
+        # Also detect multi-field (when no schema but multiple keywords)
+        is_multi_field = len(keywords) >= 3 and not is_attribute_target and not is_schema_extraction
+        
+        _log_event(task_id, "target_type_detected", 
+                   is_schema_extraction=is_schema_extraction,
+                   schema_fields=schema_fields,
+                   is_multi_field=is_multi_field, 
+                   is_attribute_target=is_attribute_target, 
+                   target_attribute=target_attribute)
         
         content = _prepare_search_content(inner_text, html_content)
         text_content = content["text_content"]
@@ -790,9 +964,18 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         
         extracted_data = []
         
-        if cache_result["matches"]:
+        # SCHEMA-BASED EXTRACTION (highest priority)
+        if is_schema_extraction and schema_fields:
+            _log_event(task_id, "using_schema_extraction", fields=schema_fields)
+            extracted_data = _run_schema_extraction(
+                task_id, schema_fields, inner_text, html_content, llm
+            )
+            if extracted_data:
+                _log_event(task_id, "schema_extraction_complete", count=len(extracted_data))
+        
+        if cache_result["matches"] and not extracted_data:
             extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
-        else:
+        elif not extracted_data:
             # UNIVERSAL EXTRACTION PIPELINE
             # Flow depends on target type:
             # - Attribute targets (e.g. URLs, SRCs): Find text anchors -> extract attribute

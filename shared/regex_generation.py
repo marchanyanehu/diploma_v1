@@ -170,18 +170,38 @@ def build_generation_messages(
             if ex and ex in marked_snippet:
                 marked_snippet = marked_snippet.replace(ex, f"[[EXAMPLE→]]{ex}[[←EXAMPLE]]", 1)
         
-        user = (
-            f"TARGET: {target_desc}\n\n"
-            f"EXAMPLES (the regex MUST capture each of these exactly as shown):\n{_examples_block(examples)}\n\n"
-            f"CONTENT SNIPPET (examples are marked with [[EXAMPLE→]]...[[←EXAMPLE]]):\n"
-            f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
-            f"INSTRUCTIONS:\n"
-            f"1. Find the [[EXAMPLE→]]...[[←EXAMPLE]] markers in the snippet.\n"
-            f"2. Look at the HTML tags/classes IMMEDIATELY before each marker - that's your anchor.\n"
-            f"3. Build a regex using THOSE specific tags/classes to capture text in that position.\n"
-            f"4. Do NOT use other classes from elsewhere in the snippet.\n\n"
-            f"{_GENERATION_RULES}"
-        )
+        # Detect if example is multi-line (spans multiple HTML elements)
+        has_multiline_example = any('\n' in ex for ex in examples if ex)
+        
+        if has_multiline_example:
+            # For multi-line/block content (descriptions, articles, etc.)
+            user = (
+                f"TARGET: {target_desc}\n\n"
+                f"EXPECTED TEXT CONTENT (this is the inner text, not exact HTML):\n{_examples_block(examples)}\n\n"
+                f"HTML SNIPPET:\n"
+                f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
+                f"CRITICAL INSTRUCTIONS:\n"
+                f"1. ONLY match visible HTML elements (<h1>, <p>, <div>, <li>, etc.) - NOT JSON or script content.\n"
+                f"2. IGNORE any embedded JSON like \"title\":\"...\" - these are data structures, not visible text.\n"
+                f"3. Look for the EXACT example text within HTML tags in the snippet.\n"
+                f"4. For titles: <h1[^>]*>([^<]+)</h1> or similar\n"
+                f"5. For descriptions: find the container div/section with a stable class, then capture its contents.\n"
+                f"6. The captured text MUST match the examples provided.\n\n"
+                f"{_GENERATION_RULES}"
+            )
+        else:
+            user = (
+                f"TARGET: {target_desc}\n\n"
+                f"EXAMPLES (the regex MUST capture each of these exactly as shown):\n{_examples_block(examples)}\n\n"
+                f"CONTENT SNIPPET (examples are marked with [[EXAMPLE→]]...[[←EXAMPLE]]):\n"
+                f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
+                f"INSTRUCTIONS:\n"
+                f"1. Find the [[EXAMPLE→]]...[[←EXAMPLE]] markers in the snippet.\n"
+                f"2. Look at the HTML tags/classes IMMEDIATELY before each marker - that's your anchor.\n"
+                f"3. Build a regex using THOSE specific tags/classes to capture text in that position.\n"
+                f"4. Do NOT use other classes from elsewhere in the snippet.\n\n"
+                f"{_GENERATION_RULES}"
+            )
         
     return [
         {"role": "system", "content": _SYSTEM_INSTRUCTION},
@@ -295,6 +315,8 @@ def validate_regex(
         result["error"] = f"Runtime match error: {str(e)}"
         return result
         
+    # Filter out None values from matches (can happen with optional capture groups)
+    matches = [m for m in matches if m is not None]
     result["matches"] = matches
     
     # 4. Check Constraints
@@ -318,26 +340,51 @@ def validate_regex(
     # All provided examples MUST be present in the matches
     # We normalize for comparison if case-insensitive flag is set
     # Note: Examples might be substrings of the full match or exact matches.
-    # The prompt usually asks for exact matches.
+    # For HTML content, we also check if the TEXT CONTENT matches (ignoring HTML tags)
+    
+    def _strip_html_and_normalize(text: str) -> str:
+        """Strip HTML tags and normalize whitespace for comparison."""
+        import re as _re
+        # Remove HTML tags
+        stripped = _re.sub(r'<[^>]+>', ' ', text)
+        # Normalize whitespace (newlines, multiple spaces -> single space)
+        stripped = _re.sub(r'\s+', ' ', stripped).strip()
+        return stripped
     
     missing = []
     # Optimization: use set for fast lookups
     match_set = set(matches)
     if 'i' in flags:
         match_set = {m.lower() for m in matches}
+    
+    # Also create normalized versions for HTML comparison
+    normalized_matches = [_strip_html_and_normalize(m) for m in matches]
+    if 'i' in flags:
+        normalized_matches = [m.lower() for m in normalized_matches]
         
     for ex in examples:
         if not ex: continue
         check_ex = ex if 'i' not in flags else ex.lower()
+        normalized_ex = _strip_html_and_normalize(check_ex)
         
-        # We check if the example is in the set of matches
-        # If exact match required:
-        if check_ex not in match_set:
-            # Fallback: maybe it's a substring? 
-            # Actually, for rigorous extraction, we want the regex to capture the exact value.
-            # But sometimes whitespace differs.
-            # Let's check if it's present as a substring in any match (looser)
-            # Or strict? Let's be strict first.
+        # Check 1: Exact match
+        if check_ex in match_set:
+            continue
+            
+        # Check 2: Normalized text content match (handles HTML captures)
+        found = False
+        for norm_match in normalized_matches:
+            # Check if normalized example is contained in normalized match
+            if normalized_ex in norm_match or norm_match in normalized_ex:
+                found = True
+                break
+            # Also check first significant part (for multi-line examples)
+            first_part = normalized_ex.split('.')[0].strip() if '.' in normalized_ex else normalized_ex[:50]
+            if len(first_part) > 10 and first_part in norm_match:
+                found = True
+                break
+                
+        if not found:
             missing.append(ex)
             
     if missing:
