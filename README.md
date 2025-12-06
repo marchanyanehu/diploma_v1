@@ -42,10 +42,29 @@ The system is composed of the following microservices:
     -   Copy `.env.example` to `.env`.
     -   Set your API keys (`GOOGLE_API_KEY` or `OPENAI_API_KEY`).
     -   Set `SECRET_KEY` for JWT auth.
+    -   Use least-privilege DB creds: `DB_USER=app_write`, `DB_PASSWORD=<strong>`, keep `POSTGRES_USER` only for admin/bootstrap.
 3.  **Run**:
     ```bash
     docker-compose up --build
     ```
+
+## Database Setup (roles, migrations, seeds)
+
+- **Roles (once per environment, run as postgres):**
+  ```bash
+  psql -h <host> -p 5432 -U postgres -d diploma_db \
+    -v app_read_pwd='<strong>' \
+    -v app_write_pwd='<strong>' \
+    -v app_admin_pwd='<strong>' \
+    -f scripts/db_roles.sql
+  ```
+- **Migrations:** `alembic upgrade head` (or let the API start with the database available and alembic invoked separately).
+- **Seeds (idempotent, run as app_admin):**
+  ```bash
+  psql -h <host> -p 5432 -U app_admin -d diploma_db -f scripts/db_seed.sql
+  # demo credentials: demo_user / Password123!
+  ```
+- **Schema/roles reference:** see `reference_docs/DB/data_dictionary.md`.
 
 ## API Documentation
 
