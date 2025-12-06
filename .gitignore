@@ -207,3 +207,7 @@ alembic.ini
 *.temp
 temp/
 tmp/
+
+*.dat
+*.bak
+*.dir
