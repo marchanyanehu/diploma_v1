@@ -13,8 +13,8 @@ import os
 
 from sqlalchemy.orm import Session
 
-from .. import db_utils
 from ..models import TaskStatus
+from ..repositories import TaskRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +51,14 @@ class TaskService:
 
     db: Session
     queue: TaskQueue
+    task_repo: TaskRepository
     fallback_task: Optional[Callable[[str, str, str], None]] = None
 
     def create_task(self, url: str, prompt: str, owner_id: int) -> str:
         """Create a task record and enqueue async processing."""
         task_id = str(uuid4())
         try:
-            db_utils.create_scraping_task(
-                db=self.db,
+            self.task_repo.create(
                 task_id=task_id,
                 url=url,
                 user_prompt=prompt,
@@ -94,7 +94,7 @@ class TaskService:
 
     def get_task_for_user(self, task_id: str, owner_id: int):
         """Fetch a task and ensure ownership constraints."""
-        task = db_utils.get_scraping_task(self.db, task_id)
+        task = self.task_repo.get_by_task_id(task_id)
         if task is None:
             raise TaskNotFoundError(task_id)
         if task.owner_id != owner_id:
