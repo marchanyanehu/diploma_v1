@@ -666,8 +666,9 @@ def _run_schema_extraction(
     
     This is designed for structured extraction like:
     - job_title, country, city, state, apply_url
+    - item_name, price, quantity (multiple records)
     
-    Returns a single record with all fields populated.
+    Returns one or more records with all fields populated.
     """
     _log_event(task_id, "schema_extraction_start", fields=schema_fields)
     
@@ -680,59 +681,109 @@ PAGE CONTENT:
 {inner_text[:15000]}
 
 INSTRUCTIONS:
-1. For each field, find the EXACT value from the page content.
-2. If a field has multiple parts (like "Denver, CO"), split them appropriately (city="Denver", state="CO").
-3. For URL fields (like apply_url), look for "Apply" buttons or similar.
-4. If a field is not found, use empty string.
-5. Return ONLY a JSON object with the field names as keys.
+1. Find ALL items/records that match the requested fields.
+2. If there are MULTIPLE items (like a list of products, jobs, etc.), return a JSON array with ALL of them.
+3. For each item, extract the EXACT values from the page content.
+4. If a field is not found for an item, use empty string.
+5. Return ONLY valid JSON - either an array of objects OR a single object.
 
-Example output format:
-{{"job_title": "Software Engineer", "country": "United States", "city": "New York", "state": "NY", "apply_url": "https://..."}}
+Example for MULTIPLE items (products, listings, etc.):
+{{"items": [{{"name": "Product 1", "price": "$10"}}, {{"name": "Product 2", "price": "$20"}}]}}
 
-Return ONLY the JSON object, no other text."""
+Example for SINGLE item (job posting, article, etc.):
+{{"job_title": "Software Engineer", "city": "New York"}}
+
+Return ONLY the JSON, no other text."""
 
     try:
         messages = [
-            {"role": "system", "content": "You are a data extraction assistant. Extract structured data from web page content. Output ONLY valid JSON."},
+            {"role": "system", "content": "You are a data extraction assistant. Extract ALL structured data from web page content. If there are multiple items, return them ALL as a JSON array. Output ONLY valid JSON."},
             {"role": "user", "content": prompt}
         ]
         
         raw_response = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
         _log_event(task_id, "schema_llm_response", response=raw_response[:500])
         
-        # Parse the JSON response
+        # Parse the JSON response - handle both arrays and objects
         import re
-        json_match = re.search(r'\{[^{}]*\}', raw_response, re.DOTALL)
-        if json_match:
-            field_values = _json.loads(json_match.group(0))
-        else:
-            field_values = _json.loads(raw_response)
+        parsed_data = None
         
-        _log_event(task_id, "schema_fields_extracted", values=field_values)
+        # Try to parse as JSON directly
+        try:
+            parsed_data = _json.loads(raw_response)
+        except _json.JSONDecodeError:
+            # Try to extract JSON from response
+            # First try array
+            array_match = re.search(r'\[[\s\S]*\]', raw_response)
+            if array_match:
+                try:
+                    parsed_data = _json.loads(array_match.group(0))
+                except:
+                    pass
+            
+            # Then try object
+            if parsed_data is None:
+                obj_match = re.search(r'\{[\s\S]*\}', raw_response)
+                if obj_match:
+                    try:
+                        parsed_data = _json.loads(obj_match.group(0))
+                    except:
+                        pass
         
-        # Step 2: For URL fields, extract from HTML if not found in text
-        for field in schema_fields:
-            if 'url' in field.lower() and (not field_values.get(field) or field_values.get(field) == ""):
-                # Try to find apply/action URLs in HTML
-                apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
-                apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
-                if apply_matches:
-                    # Prefer full URLs
-                    full_urls = [u for u in apply_matches if u.startswith('http')]
-                    field_values[field] = full_urls[0] if full_urls else apply_matches[0]
-                    _log_event(task_id, "schema_url_extracted", field=field, value=field_values[field])
+        if parsed_data is None:
+            _log_event(task_id, "schema_extraction_failed", error="Could not parse JSON response")
+            return []
         
-        # Build result record
-        if field_values:
-            text_repr = " | ".join(f"{k}: {v}" for k, v in field_values.items() if v)
-            result = {
-                "text": text_repr,
-                "fields": field_values,
-                "source": "schema_extraction",
-                "confidence": 0.9
-            }
-            _log_event(task_id, "schema_extraction_success", fields=list(field_values.keys()))
-            return [result]
+        # Normalize to list of records
+        records = []
+        if isinstance(parsed_data, list):
+            records = parsed_data
+        elif isinstance(parsed_data, dict):
+            # Check if it has an "items" key (common pattern)
+            if "items" in parsed_data and isinstance(parsed_data["items"], list):
+                records = parsed_data["items"]
+            # Check for other common array keys
+            elif any(k in parsed_data for k in ["data", "results", "records", "list"]):
+                for key in ["data", "results", "records", "list"]:
+                    if key in parsed_data and isinstance(parsed_data[key], list):
+                        records = parsed_data[key]
+                        break
+            else:
+                # Single object - wrap in list
+                records = [parsed_data]
+        
+        _log_event(task_id, "schema_records_found", count=len(records))
+        
+        # Build result records
+        extracted_data = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            
+            # For URL fields, try to extract from HTML if not found
+            for field in schema_fields:
+                if 'url' in field.lower() and (not record.get(field) or record.get(field) == ""):
+                    # Try to find apply/action URLs in HTML
+                    apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
+                    apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
+                    if apply_matches:
+                        full_urls = [u for u in apply_matches if u.startswith('http')]
+                        record[field] = full_urls[0] if full_urls else apply_matches[0]
+            
+            # Build text representation
+            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
+            if text_repr:
+                extracted_data.append({
+                    "text": text_repr,
+                    "fields": record,
+                    "source": "schema_extraction",
+                    "confidence": 0.9
+                })
+        
+        if extracted_data:
+            _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
+        
+        return extracted_data
             
     except Exception as e:
         _log_event(task_id, "schema_extraction_failed", error=str(e))
