@@ -4,43 +4,39 @@ A microservice-based web scraping system powered by LLMs to intelligently extrac
 
 ## Architecture
 
-The system is composed of the following microservices:
+Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
 
-1.  **API Service (`api`)**: 
-    -   Entry point for users.
-    -   Handles Authentication (JWT).
-    -   Manages scraping tasks and scheduled jobs.
-    -   Exposes REST endpoints.
-2.  **Scheduler Service (`scheduler`)**:
-    -   Runs periodic checks (Celery Beat) for due scheduled jobs.
-    -   Triggers scraping tasks automatically.
-3.  **Headless Worker (`headless_worker`)**:
-    -   Handles actual web page fetching using Playwright.
-    -   Captures visible text (for AI analysis) and full HTML (for extraction).
-    -   Operates in a stealthy context.
-4.  **AI Worker (`ai_worker`)**:
-    -   **Intent Extraction**: Understands what the user wants (target, keywords).
-    -   **Optimized Pipeline**:
-        1.  Finds *examples* of data in the visible text (token-efficient).
-        2.  Locates candidate snippets in the full HTML.
-        3.  Uses LLM to *disambiguate* and select the best source snippet.
-        4.  Generates a precise RegEx based on the snippet.
-    -   Extracts data using the generated RegEx.
+1. **API Service (`api`)**
+    - JWT auth (`/auth/register`, `/auth/token`)
+    - Creates scraping tasks and exposes status/result endpoints
+    - Manages user-owned schedules (CRUD on `/api/v1/jobs`)
+2. **Scheduler Service (`scheduler`)**
+    - Celery Beat job that enqueues due schedules every minute
+3. **Headless Worker (`headless_worker`)**
+    - Playwright fetcher; captures visible text + full HTML and forwards to AI
+    - Runs on Celery `fetching_queue`
+4. **AI Worker (`ai_worker`)**
+    - Intent extraction + optimized regex pipeline
+    - Uses LLM (Gemini/OpenAI) for intent, snippet choice, regex generation
+    - Runs on Celery `ai_queue`
 
 ## Key Features
 
 -   **Natural Language Interface**: "Get me all prices from this page."
--   **Token-Optimized AI**: Minimizes LLM costs by processing text/snippets instead of full HTML.
--   **Automated Scheduling**: Set up Cron-like schedules for recurring scrapes.
--   **Robust Fetching**: Uses Playwright to handle dynamic JS-heavy sites.
+-   **Token-Optimized AI**: Works on visible text, then focused HTML snippets to cut LLM cost.
+-   **Regex + Cache**: Generated regex is cached per-domain/keywords for reuse.
+-   **Automated Scheduling**: Cron-like schedules per user via `/api/v1/jobs`.
+-   **Robust Fetching**: Playwright worker with retry/backoff knobs.
 -   **Microservices**: Scalable and decoupled architecture.
+-   **JWT Auth**: All task and schedule endpoints require Bearer tokens.
 
 ## Setup & Installation
 
 1.  **Prerequisites**: Docker and Docker Compose.
 2.  **Environment Variables**:
     -   Copy `.env.example` to `.env`.
-    -   Set your API keys (`GOOGLE_API_KEY` or `OPENAI_API_KEY`).
+    -   Set your LLM keys (`GOOGLE_API_KEY` or `GEMINI_API_KEY`, or `OPENAI_API_KEY`).
+    -   Choose provider/model via `LLM_PROVIDER`/`LLM_MODEL` (default: gemini / gemini-2.0-flash).
     -   Set `SECRET_KEY` for JWT auth.
     -   Use least-privilege DB creds: `DB_USER=app_write`, `DB_PASSWORD=<strong>`, keep `POSTGRES_USER` only for admin/bootstrap.
 3.  **Run**:
@@ -66,17 +62,20 @@ The system is composed of the following microservices:
   ```
 - **Schema/roles reference:** see `reference_docs/DB/data_dictionary.md`.
 
-## API Documentation
+## Services & API
 
-Once running, visit: `http://localhost:8000/docs`
+Once running, visit: `http://localhost:8000/docs`.
+
+### Auth
+-   Register: `POST /auth/register`
+-   Login: `POST /auth/token` -> returns `access_token`
+-   Use `Authorization: Bearer <token>` for all `/api/v1/*` routes
 
 ### Authentication
--   **Register**: `POST /auth/register`
--   **Login**: `POST /auth/token` -> returns `access_token`.
--   Use the token in the `Authorization: Bearer <token>` header for protected endpoints.
+-   Required for tasks and schedules.
 
 ### Core Endpoints
--   **Create Task**: `POST /api/v1/process` (requires Auth)
+-   **Create Task**: `POST /api/v1/process`
 -   **Check Status**: `GET /api/v1/status/{task_id}`
 -   **Get Result**: `GET /api/v1/result/{task_id}`
 
@@ -84,6 +83,12 @@ Once running, visit: `http://localhost:8000/docs`
 -   **Create Job**: `POST /api/v1/jobs`
 -   **List Jobs**: `GET /api/v1/jobs`
 -   **Delete Job**: `DELETE /api/v1/jobs/{job_id}`
+-   Jobs enqueue tasks via Celery Beat every minute.
+
+### Workers & Queues
+-   **Headless Worker** (`fetching_queue`): Playwright fetch → sends `scrape.process_content`
+-   **AI Worker** (`ai_queue`): Intent + regex pipeline; caches parsers
+-   **Scheduler**: Celery Beat task `scheduler.check_due_jobs`
 
 ## Development
 

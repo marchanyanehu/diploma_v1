@@ -1,32 +1,29 @@
 # FastAPI Service - Intelligent Web Data Aggregator
 
-This is the main API service for the Intelligent Web Data Aggregator project. It provides REST endpoints for processing web scraping requests using natural language prompts.
+This is the main API service for the Intelligent Web Data Aggregator project. It exposes authenticated endpoints to create scraping tasks, poll their status/results, and manage user schedules.
 
 ## Features
 
-- **FastAPI Framework**: Modern, fast web framework for building APIs
-- **Automatic Documentation**: Interactive API documentation with Swagger UI
-- **Data Validation**: Request/response validation with Pydantic
-- **Health Checks**: Built-in health monitoring endpoints
-- **CORS Support**: Cross-origin resource sharing configuration
-- **Error Handling**: Comprehensive error handling with custom responses
-- **Configuration Management**: Environment-based configuration
-- **Docker Support**: Containerized deployment with multi-stage builds
+- **JWT Auth**: `/auth/register` and `/auth/token` issue Bearer tokens.
+- **Task lifecycle**: create, poll status, and fetch results for scraping tasks.
+- **Scheduling**: per-user cron schedules via `/api/v1/jobs`.
+- **Celery integration**: enqueues headless + AI workers (`shared/celery_app.py`).
+- **FastAPI extras**: OpenAPI docs, CORS, error handlers, logging.
 
 ## Project Structure
 
 ```
 services/api/
-├── main.py              # Main FastAPI application
-├── config.py            # Configuration settings
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Container configuration
-├── models/             # Pydantic models
-│   └── __init__.py     # Request/response models
-└── tests/              # Test suite
-    ├── __init__.py
-    ├── conftest.py     # Test configuration
-    └── test_main.py    # Main application tests
+├── main.py              # FastAPI app and routes
+├── config.py            # Settings loader (env/.env)
+├── database.py          # Session & engine
+├── db_models.py         # ORM models
+├── models.py            # Pydantic schemas
+├── services/            # task/auth services
+├── repositories.py      # DB repositories
+├── logging_config.py    # Structured logging
+├── error_handlers.py    # Custom error responses
+└── tests/               # API and service tests
 ```
 
 ## Quick Start
@@ -39,20 +36,19 @@ services/api/
    pip install -r requirements.txt
    ```
 
-2. **Set Environment Variables** (optional):
+2. **Set Environment Variables** (or copy `.env.example` to project root):
    ```bash
    export DEBUG=true
    export HOST=localhost
    export PORT=8000
+   export LLM_PROVIDER=gemini   # or openai
+   export GOOGLE_API_KEY=...    # or GEMINI_API_KEY / OPENAI_API_KEY
+   export SECRET_KEY=...
    ```
 
 3. **Run the Application**:
    ```bash
-   # Run with uvicorn directly
-   uvicorn main:app --reload --host localhost --port 8000
-   
-   # Or using the main module
-   python main.py
+   uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 4. **Access the API**:
@@ -75,34 +71,45 @@ services/api/
 
 ## API Endpoints
 
-### Core Endpoints
+### Health
+- `GET /` - Root metadata
+- `GET /health` - Service health
+- `GET /api/v1/health` - API + DB health
 
-- `GET /` - Root endpoint with API information
-- `GET /health` - Health check endpoint
-- `GET /api/v1/health` - API v1 health check
+### Auth (JWT)
+- `POST /auth/register`
+- `POST /auth/token` → `access_token`
 
-### Future/Async Endpoints (Tasks #201-207)
+### Tasks (auth required)
+- `POST /api/v1/process` - Create scraping task (returns task_id)
+- `GET /api/v1/status/{task_id}` - Poll task status
+- `GET /api/v1/result/{task_id}` - Get final result (202 if not ready)
 
-- `POST /api/v1/process` - Process scraping request
-- `GET /api/v1/status/{task_id}` - Check task status
-- `GET /api/v1/result/{task_id}` - Get task results
+### Scheduling (auth required)
+- `POST /api/v1/jobs` - Create cron job
+- `GET /api/v1/jobs` - List jobs for current user
+- `DELETE /api/v1/jobs/{job_id}` - Delete job
 
-The API enqueues long-running scraping work to Celery (Redis broker). See
-`shared/celery_app.py` and `services/playwright_worker/tasks.py`.
+Background work is dispatched via Celery to `headless_worker` (fetching_queue) and `ai_worker` (ai_queue). See `shared/celery_app.py`, `services/headless_worker/tasks.py`, and `services/ai_worker/tasks.py`.
 
 ## Configuration
 
-The application supports configuration through environment variables:
+Key environment variables (root `.env` or process env):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG` | `false` | Enable debug mode |
 | `HOST` | `0.0.0.0` | Server host |
 | `PORT` | `8000` | Server port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `OPENAI_API_KEY` | - | OpenAI API key for LLM |
-| `SECRET_KEY` | - | Application secret key |
+| `DATABASE_URL` / `DB_*` | - | PostgreSQL connection |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis/Celery broker |
+| `CELERY_BROKER_URL` | `${REDIS_URL}` | Celery broker |
+| `CELERY_RESULT_BACKEND` | `${REDIS_URL}` | Celery backend |
+| `GOOGLE_API_KEY`/`GEMINI_API_KEY` | - | Gemini LLM key |
+| `OPENAI_API_KEY` | - | OpenAI LLM key |
+| `LLM_PROVIDER` | `gemini` | LLM provider |
+| `LLM_MODEL` | `gemini-2.0-flash` | Model name |
+| `SECRET_KEY` | - | JWT signing key |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
 
 ## Testing
