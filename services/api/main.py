@@ -13,10 +13,13 @@ from sqlalchemy.orm import Session
 import uvicorn
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, cast, List
-import logging, os
+import logging
 
 # Import database components
 from .database import get_db, create_tables
+from .config import settings
+from .logging_config import setup_logging
+from .error_handlers import register_error_handlers
 from .db_models import ScrapingTask, ParserCache, User
 from .models import (
     ScrapeRequest,
@@ -32,7 +35,6 @@ from .models import (
     ScheduledJobResponse,
 )
 from . import auth
-from . import db_utils
 from shared.celery_app import celery_app
 from .services.task_service import (
     TaskService,
@@ -40,23 +42,16 @@ from .services.task_service import (
     TaskNotFoundError,
     TaskForbiddenError,
 )
+from .services.auth_service import AuthService
 from .services import task_presenter
+from .repositories import UserRepository, TaskRepository, ScheduleRepository
 try:  # optional import for inline fallback
     from services.headless_worker.tasks import process_request_task  # type: ignore
 except Exception:  # noqa: BLE001
     process_request_task = None  # type: ignore
 
-# Configure logging
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.getenv("API_LOG_FILE", "api_debug.log"), encoding="utf-8")
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configure logging centrally
+logger = setup_logging(settings.log_level, settings.api_log_file)
 
 # Initialize FastAPI app
 tags_metadata = [
@@ -133,10 +128,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_error_handlers(app)
+
 def get_task_service(db: Session = Depends(get_db)) -> TaskService:
     """Provide TaskService with injected dependencies (DIP)."""
     queue = CeleryTaskQueue(celery_app)
-    return TaskService(db=db, queue=queue, fallback_task=process_request_task)
+    task_repo = TaskRepository(db)
+    return TaskService(db=db, queue=queue, fallback_task=process_request_task, task_repo=task_repo)
+
+
+def get_task_repo(db: Session = Depends(get_db)) -> TaskRepository:
+    return TaskRepository(db)
+
+
+def get_user_repo(db: Session = Depends(get_db)) -> UserRepository:
+    return UserRepository(db)
+
+
+def get_schedule_repo(db: Session = Depends(get_db)) -> ScheduleRepository:
+    return ScheduleRepository(db)
 
 
 ## Startup hook replaced by lifespan
@@ -215,44 +225,61 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
 # --- Auth Endpoints ---
 
 @app.post("/auth/register", response_model=UserResponse, tags=["Auth"])
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db_utils.get_user_by_username(db, username=user.username)
+def register(
+    user: UserCreate,
+    user_repo: UserRepository = Depends(get_user_repo),
+    auth_service: auth.AuthService = Depends(auth.get_auth_service),
+):
+    db_user = user_repo.get_by_username(username=user.username)
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
     try:
-        hashed_password = auth.get_password_hash(user.password)
+        hashed_password = auth_service.hash_password(user.password)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return db_utils.create_user(db=db, username=user.username, password_hash=hashed_password, email=user.email)
+    return user_repo.create(username=user.username, password_hash=hashed_password, email=user.email)
 
 @app.post("/auth/token", response_model=Token, tags=["Auth"])
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db_utils.get_user_by_username(db, form_data.username)
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    user_repo: UserRepository = Depends(get_user_repo),
+    auth_service: auth.AuthService = Depends(auth.get_auth_service),
+):
+    user = user_repo.get_by_username(form_data.username)
+    if not user or not auth_service.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth.create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
+    access_token = auth_service.create_access_token(user.username, access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
 
 # --- Scheduler Endpoints ---
 
 @app.post("/api/v1/jobs", response_model=ScheduledJobResponse, tags=["Scheduler", "API v1"])
-def create_job(job: ScheduledJobCreate, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    return db_utils.create_scheduled_job(db, str(job.url), job.prompt, job.schedule_cron, current_user.id)
+def create_job(
+    job: ScheduledJobCreate,
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return schedule_repo.create(str(job.url), job.prompt, job.schedule_cron, current_user.id)
 
 @app.get("/api/v1/jobs", response_model=List[ScheduledJobResponse], tags=["Scheduler", "API v1"])
-def list_jobs(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    return db_utils.get_scheduled_jobs(db, current_user.id)
+def list_jobs(
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return schedule_repo.list_for_owner(current_user.id)
 
 @app.delete("/api/v1/jobs/{job_id}", tags=["Scheduler", "API v1"])
-def delete_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    success = db_utils.delete_scheduled_job(db, job_id, current_user.id)
+def delete_job(
+    job_id: int,
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    current_user: User = Depends(auth.get_current_user),
+):
+    success = schedule_repo.delete_for_owner(job_id, current_user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"message": "Job deleted"}
@@ -511,7 +538,7 @@ async def get_task_result(
 
 
 @app.post("/api/v1/test-task", tags=["Testing", "API v1"])
-async def create_test_task(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def create_test_task(task_repo: TaskRepository = Depends(get_task_repo)) -> Dict[str, Any]:
     """
     Test endpoint to create a sample scraping task.
     
@@ -519,8 +546,7 @@ async def create_test_task(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     try:
         # Create a test task
-        task = db_utils.create_scraping_task(
-            db=db,
+        task = task_repo.create(
             task_id=f"test-{datetime.now(timezone.utc).isoformat()}",
             url="https://example.com",
             user_prompt="Test task for database verification",
@@ -541,33 +567,6 @@ async def create_test_task(db: Session = Depends(get_db)) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to create test task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create test task: {str(e)}")
-
-
-# Error handlers
-@app.exception_handler(404)
-async def not_found_handler(request, exc):
-    """Handle 404 errors with custom response."""
-    return JSONResponse(
-        status_code=404,
-        content={
-            "error": "Not Found",
-            "message": "The requested resource was not found",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    )
-
-
-@app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    """Handle 500 errors with custom response."""
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal Server Error",
-            "message": "An internal server error occurred",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    )
 
 
 if __name__ == "__main__":

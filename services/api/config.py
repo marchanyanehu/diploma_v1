@@ -79,6 +79,10 @@ class Settings(BaseForSettings):  # type: ignore[misc]
     
     # Security
     secret_key: str = Field(default="your-secret-key-change-in-production", alias="SECRET_KEY")
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    api_log_file: str = Field(default="api_debug.log", alias="API_LOG_FILE")
     
     # CORS
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")

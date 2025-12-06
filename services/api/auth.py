@@ -1,69 +1,73 @@
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Union, Any
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import timedelta
+from typing import Optional
+from .config import settings
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from jose import JWTError
+
 from .database import get_db
 from .db_models import User
-import os
-
-# Config
-SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_me")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
-
-MAX_BCRYPT_PASSWORD_BYTES = 72
-PASSWORD_BYTES_ERROR = (
-    "Password must be at most 72 bytes when encoded as UTF-8 to work with bcrypt."
+from .services.auth_service import (
+    AuthService,
+    SqlAlchemyUserRepository,
+    MAX_BCRYPT_PASSWORD_BYTES,
+    PASSWORD_BYTES_ERROR,
 )
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+# Config defaults sourced from settings
+SECRET_KEY = settings.secret_key
+ALGORITHM = getattr(settings, "jwt_algorithm", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = getattr(settings, "access_token_expire_minutes", 30)
 
-def _ensure_password_within_limit(password: str) -> None:
-    if len(password.encode("utf-8")) > MAX_BCRYPT_PASSWORD_BYTES:
-        raise ValueError(PASSWORD_BYTES_ERROR)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
-def get_password_hash(password: str) -> str:
-    _ensure_password_within_limit(password)
-    return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    """Provide AuthService with DB-backed user repository."""
+    repo = SqlAlchemyUserRepository(db)
+    return AuthService(
+        secret_key=SECRET_KEY,
+        algorithm=ALGORITHM,
+        access_token_expire_minutes=ACCESS_TOKEN_EXPIRE_MINUTES,
+        user_repo=repo,
+    )
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+
+def get_password_hash(password: str, auth_service: AuthService = Depends(get_auth_service)) -> str:
+    return auth_service.hash_password(password)
+
+
+def verify_password(plain_password: str, hashed_password: str, auth_service: AuthService = Depends(get_auth_service)) -> bool:
+    return auth_service.verify_password(plain_password, hashed_password)
+
+
+def create_access_token(username: str, expires_delta: Optional[timedelta] = None, auth_service: AuthService = Depends(get_auth_service)) -> str:
+    return auth_service.create_access_token(username, expires_delta)
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
+        username = auth_service.decode_username(token)
     except JWTError:
         raise credentials_exception
-    
-    user = db.query(User).filter(User.username == username).first()
+
+    user = auth_service.get_user(username)
     if user is None:
         raise credentials_exception
     return user
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
+
+def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
