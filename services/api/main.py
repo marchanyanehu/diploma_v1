@@ -12,8 +12,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import uvicorn
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, cast
-from uuid import uuid4
+from typing import Dict, Any, Optional, cast, List
 import logging, os
 
 # Import database components
@@ -32,10 +31,15 @@ from .models import (
     ScheduledJobCreate,
     ScheduledJobResponse,
 )
-from typing import Dict, Any, Optional, cast, List
 from . import auth
 from . import db_utils
 from shared.celery_app import celery_app
+from .services.task_service import (
+    TaskService,
+    CeleryTaskQueue,
+    TaskNotFoundError,
+    TaskForbiddenError,
+)
 try:  # optional import for inline fallback
     from services.headless_worker.tasks import process_request_task  # type: ignore
 except Exception:  # noqa: BLE001
@@ -127,6 +131,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def get_task_service(db: Session = Depends(get_db)) -> TaskService:
+    """Provide TaskService with injected dependencies (DIP)."""
+    queue = CeleryTaskQueue(celery_app)
+    return TaskService(db=db, queue=queue, fallback_task=process_request_task)
 
 
 ## Startup hook replaced by lifespan
@@ -293,6 +302,7 @@ async def process_request(
     request: ScrapeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
     """
     Create a new scraping task for the provided URL and prompt.
@@ -300,40 +310,11 @@ async def process_request(
     Note: Actual async processing is added in Task #203. For now, we persist
     a PENDING task and return its identifier so clients can poll status later.
     """
-    task_id = str(uuid4())
-    logger.info("api.process_request.received", extra={"task_id": task_id, "url": str(request.url), "user": current_user.username})
-    try:
-        # Best-effort persistence; if DB is unavailable, continue gracefully
-        db_utils.create_scraping_task(
-            db=db,
-            task_id=task_id,
-            url=str(request.url),
-            user_prompt=request.prompt,
-            status=TaskStatus.PENDING.value,
-            owner_id=current_user.id,
-        )
-    except Exception as e:
-        logger.warning("api.process_request.db_persist_failed", extra={"task_id": task_id, "error": str(e)})
-
-    # Enqueue background processing via Celery (non-blocking)
-    try:
-        celery_app.send_task(
-            "scrape.process_request_full",
-            args=[task_id, str(request.url), request.prompt],
-            queue="ai_queue", # Updated queue for full process which starts with AI/Analysis or orchestration
-        )
-        logger.info("api.process_request.enqueued", extra={"task_id": task_id})
-    except Exception as e:
-        logger.error("api.process_request.enqueue_failed", extra={"task_id": task_id, "error": str(e)})
-    # Inline fallback if eager or enqueue failed
-    if (os.getenv("CELERY_EAGER") or os.getenv("CELERY_ALWAYS_EAGER")) and process_request_task is not None:
-        try:
-            logger.info("api.process_request.inline_start", extra={"task_id": task_id})
-            process_request_task(task_id, str(request.url), request.prompt)
-            logger.info("api.process_request.inline_done", extra={"task_id": task_id})
-        except Exception as inline_exc:  # noqa: BLE001
-            logger.exception("api.process_request.inline_failed", extra={"task_id": task_id, "error": str(inline_exc)})
-
+    logger.info(
+        "api.process_request.received",
+        extra={"url": str(request.url), "user": current_user.username},
+    )
+    task_id = task_service.create_task(str(request.url), request.prompt, current_user.id)
     resp = TaskResponse(
         task_id=task_id,
         status=TaskStatus.PENDING,
@@ -387,7 +368,8 @@ async def process_request(
 async def get_task_status(
     task_id: str, 
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth.get_current_user)
+    current_user: User = Depends(auth.get_current_user),
+    task_service: TaskService = Depends(get_task_service),
 ) -> TaskStatusResponse:
     """
     Retrieve the current status for a scraping task by its task_id.
@@ -397,17 +379,14 @@ async def get_task_status(
     are applied.
     """
     try:
-        task = db_utils.get_scraping_task(db, task_id)
+        task = task_service.get_task_for_user(task_id, current_user.id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except TaskForbiddenError:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
     except Exception as e:
         logger.error(f"Failed to query task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to query task status")
-
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    # Ensure user owns the task (or is admin - simplistic check here)
-    if task.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
     # Map DB status string to API enum
     try:
@@ -518,23 +497,22 @@ async def get_task_status(
 async def get_task_result(
     task_id: str, 
     db: Session = Depends(get_db),
-    current_user: User = Depends(auth.get_current_user)
+    current_user: User = Depends(auth.get_current_user),
+    task_service: TaskService = Depends(get_task_service),
 ) -> Any:
     """
     Return the final scraping result when the task is SUCCESS. If the task
     is still running, return 202 with current status. If it failed, return 400.
     """
     try:
-        task = db_utils.get_scraping_task(db, task_id)
+        task = task_service.get_task_for_user(task_id, current_user.id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except TaskForbiddenError:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
     except Exception as e:
         logger.error(f"Failed to query task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to query task result")
-
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-        
-    if task.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this task")
 
     # Normalize status enum
     try:
