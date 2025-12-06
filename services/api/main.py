@@ -40,6 +40,7 @@ from .services.task_service import (
     TaskNotFoundError,
     TaskForbiddenError,
 )
+from .services import task_presenter
 try:  # optional import for inline fallback
     from services.headless_worker.tasks import process_request_task  # type: ignore
 except Exception:  # noqa: BLE001
@@ -388,36 +389,7 @@ async def get_task_status(
         logger.error(f"Failed to query task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to query task status")
 
-    # Map DB status string to API enum
-    try:
-        status_enum = TaskStatus(task.status)
-    except ValueError:
-        status_enum = TaskStatus.FAILED
-
-    # Extract concrete values from ORM attributes (avoid Column[T] typing)
-    task_id_value: str = cast(str, getattr(task, "task_id", ""))
-    created_at: datetime = cast(
-        datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
-    )
-    # Prefer completed_at, then started_at, else created_at
-    updated_at: datetime = cast(
-        datetime,
-        getattr(task, "completed_at", None)
-        or getattr(task, "started_at", None)
-        or created_at,
-    )
-
-    # Avoid direct truthiness checks on SQLAlchemy columns for type checkers
-    err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
-
-    return TaskStatusResponse(
-        task_id=task_id_value,
-        status=status_enum,
-        progress=None,
-        message=err_msg,
-        created_at=created_at,
-        updated_at=updated_at,
-    )
+    return task_presenter.build_status_response(task)
 
 
 @app.get(
@@ -514,22 +486,10 @@ async def get_task_result(
         logger.error(f"Failed to query task {task_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to query task result")
 
-    # Normalize status enum
-    try:
-        status_enum = TaskStatus(task.status)
-    except ValueError:
-        status_enum = TaskStatus.FAILED
+    status_enum = task_presenter.normalize_status(task)
 
     if status_enum in {TaskStatus.PENDING, TaskStatus.IN_PROGRESS}:
-        created_at: datetime = cast(
-            datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
-        )
-        updated_at: datetime = cast(
-            datetime,
-            getattr(task, "completed_at", None)
-            or getattr(task, "started_at", None)
-            or created_at,
-        )
+        created_at, updated_at = task_presenter.extract_timestamps(task)
         # Return 202 with status payload
         return JSONResponse(
             status_code=202,
@@ -547,36 +507,7 @@ async def get_task_result(
         err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
         raise HTTPException(status_code=400, detail=f"Task failed: {err_msg or 'unspecified error'}")
 
-    # SUCCESS path: build ScrapeResult
-    url_value: str = cast(str, getattr(task, "url", ""))
-    prompt_value: str = cast(str, getattr(task, "user_prompt", ""))
-    data_payload = getattr(task, "extracted_data", None) or []
-    created_at: datetime = cast(
-        datetime, getattr(task, "created_at", None) or datetime.now(timezone.utc)
-    )
-    completed_at: Optional[datetime] = cast(Optional[datetime], getattr(task, "completed_at", None))
-    processing_seconds: Optional[int] = cast(Optional[int], getattr(task, "processing_time_seconds", None))
-    used_cached: bool = bool(getattr(task, "used_cached_parser", False))
-    total_matches: Optional[int] = cast(Optional[int], getattr(task, "total_matches", None))
-    parser_id: Optional[int] = cast(Optional[int], getattr(task, "used_parser_id", None))
-
-    metadata: Dict[str, Any] = {
-        "total_matches": total_matches,
-        "used_cached_parser": used_cached,
-        "used_parser_id": parser_id,
-    }
-
-    return ScrapeResult(
-        task_id=cast(str, getattr(task, "task_id", "")),
-        status=status_enum,
-        url=cast(Any, url_value),
-        prompt=prompt_value,
-        data=data_payload,  # expected to align with ExtractedData schema when present
-        metadata={k: v for k, v in metadata.items() if v is not None},
-        processing_time=float(processing_seconds) if processing_seconds is not None else None,
-        created_at=created_at,
-        completed_at=completed_at,
-    )
+    return task_presenter.build_result_response(task)
 
 
 @app.post("/api/v1/test-task", tags=["Testing", "API v1"])
