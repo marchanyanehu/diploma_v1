@@ -659,20 +659,152 @@ def _run_multi_field_extraction(
     return extracted_data
 
 
-def _run_schema_extraction(
-    task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
+def _generate_field_regex(field_name: str, examples: List[str], html_content: str, llm: LLMClient) -> Optional[Dict[str, str]]:
+    """Generate a regex pattern for a single field based on examples found in HTML."""
+    import re
+    
+    if not examples:
+        return None
+    
+    # Find where examples appear in HTML to get context
+    snippets = []
+    for ex in examples[:3]:  # Use first 3 examples
+        if not ex:
+            continue
+        idx = html_content.find(str(ex))
+        if idx != -1:
+            start = max(0, idx - 100)
+            end = min(len(html_content), idx + len(str(ex)) + 100)
+            snippets.append(html_content[start:end])
+    
+    if not snippets:
+        return None
+    
+    # Ask LLM to generate regex
+    snippet_text = "\n---\n".join(snippets[:3])
+    prompt = f"""Generate a regex to extract "{field_name}" values from HTML.
+
+EXAMPLE VALUES TO MATCH:
+{chr(10).join(f'- {ex}' for ex in examples[:5])}
+
+HTML SNIPPETS WHERE THESE VALUES APPEAR:
+{snippet_text}
+
+INSTRUCTIONS:
+1. Create a regex that captures these values from the HTML structure.
+2. Use a single capturing group for the target value.
+3. The regex should be general enough to match similar items on the page.
+4. Output ONLY a JSON object with "regex" and "flags" keys.
+
+Example output: {{"regex": "<span class=\\"price\\">\\\\$([\\\\d.]+)</span>", "flags": "s"}}"""
+
+    try:
+        messages = [
+            {"role": "system", "content": "You are a regex expert. Generate precise regex patterns to extract data from HTML. Output ONLY valid JSON."},
+            {"role": "user", "content": prompt}
+        ]
+        raw = llm.chat(messages, temperature=0.1)
+        
+        # Parse response
+        match = re.search(r'\{[^{}]*"regex"[^{}]*\}', raw, re.DOTALL)
+        if match:
+            result = _json.loads(match.group(0))
+            return {"regex": result.get("regex", ""), "flags": result.get("flags", "s")}
+    except Exception as e:
+        logger.warning(f"Failed to generate regex for {field_name}: {e}")
+    
+    return None
+
+
+def _run_schema_extraction_with_cache(
+    task_id: str, url: str, schema_fields: List[str], inner_text: str, 
+    html_content: str, llm: LLMClient, db, domain: str
 ) -> List[Dict[str, Any]]:
-    """Extract data according to schema fields using LLM + regex.
+    """Extract data with LLM, then generate and cache regexes for reuse.
     
-    This is designed for structured extraction like:
-    - job_title, country, city, state, apply_url
-    - item_name, price, quantity (multiple records)
-    
-    Returns one or more records with all fields populated.
+    Hybrid approach:
+    1. First extraction: LLM extracts all values
+    2. Generate regex patterns based on extracted values
+    3. Cache the patterns for future requests
+    4. Future requests: Use cached regex (no LLM needed)
     """
+    import re
+    
     _log_event(task_id, "schema_extraction_start", fields=schema_fields)
     
-    # Step 1: Use LLM to identify field values from inner_text
+    # Check for cached schema regex first
+    cached_parsers = db_utils.find_cached_parser(db, domain, keywords=schema_fields) if db else []
+    
+    for parser in cached_parsers:
+        try:
+            stored_regex = cast(str, parser.generated_regex)
+            
+            # Check if this is a SCHEMA-type parser (stores field regexes as JSON)
+            if "SCHEMA:" in stored_regex:
+                _log_event(task_id, "schema_cache_found", parser_id=parser.id)
+                
+                # Extract the JSON schema data
+                schema_match = re.search(r'SCHEMA:(\{.*\})', stored_regex)
+                if not schema_match:
+                    continue
+                
+                try:
+                    schema_data = _json.loads(schema_match.group(1))
+                    field_regexes = schema_data.get("field_regexes", {})
+                except _json.JSONDecodeError:
+                    continue
+                
+                if not field_regexes:
+                    continue
+                
+                # Apply each field's regex to extract values
+                field_matches = {}
+                for field, regex_info in field_regexes.items():
+                    pattern = regex_info.get("regex", "")
+                    flags = regex_info.get("flags", "s")
+                    if pattern:
+                        matches = _apply_regex_matches(pattern, flags, html_content)
+                        if matches:
+                            # Clean HTML from matches
+                            cleaned = []
+                            for m in matches:
+                                clean = _strip_html_to_text(m) if _looks_like_html(m) else m
+                                if clean:
+                                    cleaned.append(clean)
+                            if cleaned:
+                                field_matches[field] = cleaned
+                                _log_event(task_id, "schema_field_cache_hit", field=field, count=len(cleaned))
+                
+                # Combine field matches into records
+                if field_matches:
+                    max_len = max(len(v) for v in field_matches.values())
+                    extracted_data = []
+                    
+                    for i in range(max_len):
+                        record = {}
+                        for field, values in field_matches.items():
+                            if i < len(values):
+                                record[field] = values[i]
+                        
+                        if record:
+                            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
+                            extracted_data.append({
+                                "text": text_repr,
+                                "fields": record,
+                                "source": "cached_schema_regex",
+                                "confidence": 0.95
+                            })
+                    
+                    if extracted_data:
+                        _log_event(task_id, "schema_cache_hit", parser_id=parser.id, record_count=len(extracted_data))
+                        return extracted_data
+            
+        except Exception as e:
+            logger.warning(f"Failed to apply cached schema parser: {e}")
+    
+    _log_event(task_id, "schema_cache_miss", generating_new=True)
+    
+    # No cache hit - use LLM extraction
     fields_list = ", ".join(schema_fields)
     prompt = f"""Extract the following fields from the page content:
 FIELDS TO EXTRACT: {fields_list}
@@ -687,10 +819,10 @@ INSTRUCTIONS:
 4. If a field is not found for an item, use empty string.
 5. Return ONLY valid JSON - either an array of objects OR a single object.
 
-Example for MULTIPLE items (products, listings, etc.):
+Example for MULTIPLE items:
 {{"items": [{{"name": "Product 1", "price": "$10"}}, {{"name": "Product 2", "price": "$20"}}]}}
 
-Example for SINGLE item (job posting, article, etc.):
+Example for SINGLE item:
 {{"job_title": "Software Engineer", "city": "New York"}}
 
 Return ONLY the JSON, no other text."""
@@ -704,24 +836,17 @@ Return ONLY the JSON, no other text."""
         raw_response = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
         _log_event(task_id, "schema_llm_response", response=raw_response[:500])
         
-        # Parse the JSON response - handle both arrays and objects
-        import re
+        # Parse the JSON response
         parsed_data = None
-        
-        # Try to parse as JSON directly
         try:
             parsed_data = _json.loads(raw_response)
         except _json.JSONDecodeError:
-            # Try to extract JSON from response
-            # First try array
             array_match = re.search(r'\[[\s\S]*\]', raw_response)
             if array_match:
                 try:
                     parsed_data = _json.loads(array_match.group(0))
                 except:
                     pass
-            
-            # Then try object
             if parsed_data is None:
                 obj_match = re.search(r'\{[\s\S]*\}', raw_response)
                 if obj_match:
@@ -739,38 +864,40 @@ Return ONLY the JSON, no other text."""
         if isinstance(parsed_data, list):
             records = parsed_data
         elif isinstance(parsed_data, dict):
-            # Check if it has an "items" key (common pattern)
             if "items" in parsed_data and isinstance(parsed_data["items"], list):
                 records = parsed_data["items"]
-            # Check for other common array keys
             elif any(k in parsed_data for k in ["data", "results", "records", "list"]):
                 for key in ["data", "results", "records", "list"]:
                     if key in parsed_data and isinstance(parsed_data[key], list):
                         records = parsed_data[key]
                         break
             else:
-                # Single object - wrap in list
                 records = [parsed_data]
         
         _log_event(task_id, "schema_records_found", count=len(records))
         
         # Build result records
         extracted_data = []
+        field_examples = {field: [] for field in schema_fields}
+        
         for record in records:
             if not isinstance(record, dict):
                 continue
             
+            # Collect examples for each field (for regex generation)
+            for field in schema_fields:
+                if field in record and record[field]:
+                    field_examples[field].append(str(record[field]))
+            
             # For URL fields, try to extract from HTML if not found
             for field in schema_fields:
                 if 'url' in field.lower() and (not record.get(field) or record.get(field) == ""):
-                    # Try to find apply/action URLs in HTML
                     apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
                     apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
                     if apply_matches:
                         full_urls = [u for u in apply_matches if u.startswith('http')]
                         record[field] = full_urls[0] if full_urls else apply_matches[0]
             
-            # Build text representation
             text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
             if text_repr:
                 extracted_data.append({
@@ -779,6 +906,41 @@ Return ONLY the JSON, no other text."""
                     "source": "schema_extraction",
                     "confidence": 0.9
                 })
+        
+        # Generate and cache regex patterns for future use
+        if extracted_data and len(records) >= 1:
+            _log_event(task_id, "schema_generating_regex", field_count=len(schema_fields))
+            
+            field_regexes = {}
+            for field, examples in field_examples.items():
+                if examples:
+                    regex_result = _generate_field_regex(field, examples, html_content, llm)
+                    if regex_result and regex_result.get("regex"):
+                        field_regexes[field] = regex_result
+                        _log_event(task_id, "schema_field_regex_generated", field=field)
+            
+            # If we generated regexes, cache them
+            if field_regexes:
+                # Create a combined regex pattern that captures all fields
+                # Store as a special format: JSON with field->regex mapping
+                combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
+                
+                try:
+                    db_utils.record_new_parser(
+                        db,
+                        task_id=task_id,
+                        url=url,
+                        intent={"keywords": schema_fields, "schema_fields": schema_fields},
+                        pattern=f"(?s:SCHEMA:{combined_pattern})",  # Special prefix to identify schema regex
+                        flags="s",
+                        matches_count=len(extracted_data),
+                        source_type="SCHEMA",
+                        sample_input=html_content[:2000],
+                        sample_output=[{"text": d["text"]} for d in extracted_data[:5]]
+                    )
+                    _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
+                except Exception as e:
+                    logger.warning(f"Failed to cache schema regex: {e}")
         
         if extracted_data:
             _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
@@ -790,6 +952,15 @@ Return ONLY the JSON, no other text."""
         logger.exception("Schema extraction failed")
     
     return []
+
+
+def _run_schema_extraction(
+    task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
+) -> List[Dict[str, Any]]:
+    """Wrapper for backwards compatibility - calls the new function without caching."""
+    return _run_schema_extraction_with_cache(
+        task_id, "", schema_fields, inner_text, html_content, llm, None, ""
+    )
 
 
 def _run_attribute_extraction(
@@ -1018,8 +1189,8 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # SCHEMA-BASED EXTRACTION (highest priority)
         if is_schema_extraction and schema_fields:
             _log_event(task_id, "using_schema_extraction", fields=schema_fields)
-            extracted_data = _run_schema_extraction(
-                task_id, schema_fields, inner_text, html_content, llm
+            extracted_data = _run_schema_extraction_with_cache(
+                task_id, url, schema_fields, inner_text, html_content, llm, db, domain
             )
             if extracted_data:
                 _log_event(task_id, "schema_extraction_complete", count=len(extracted_data))
