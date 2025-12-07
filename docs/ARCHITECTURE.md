@@ -44,15 +44,18 @@ graph TD
 
 ### Snippet Strategy (Token Optimization)
 
-The system uses layered snippets to handle large pages efficiently:
+The system never sends full HTML to the LLM. Instead, it uses focused snippets:
 
 | Layer | Size | Purpose |
 |-------|------|---------|
-| Full content | 1MB max | Stored for regex application |
+| Full content | Unlimited* | Stored for regex application (pure Python) |
 | LLM prompt content | 32KB max | Sent to LLM for example finding |
+| Attribute extraction | 15KB max | Sent to LLM for URL/attribute extraction |
 | Context snippet | 4000 chars | Fallback for regex generation |
 | Micro-snippet | 150 chars | Focused HTML for precise regex |
 | Line-aware snippet | 600 chars | Preserves example intact with context |
+
+*Defensive 1MB cap for database storage, but rarely reached in practice.
 
 ## Database Schema
 

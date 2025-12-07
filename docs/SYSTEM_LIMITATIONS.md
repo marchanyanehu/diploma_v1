@@ -56,12 +56,11 @@ This document describes the known limitations and constraints of the Intelligent
    - High-volume scraping not recommended
 
 10. **Content Processing Strategy**
-    - Pages are processed using a **snippet-based approach** to avoid LLM token limits
-    - Inner text is limited to 1MB (1,000,000 characters) before processing
-    - LLM prompts receive 32KB (32,768 characters) of content maximum
-    - Regex generation uses focused 600-character snippets around target examples
-    - Micro-snippets (150 chars) are used for precise HTML context
-    - Very large pages work fine due to snippet extraction strategy
+    - **No practical page size limit** - the system uses snippet extraction, so LLM never sees full HTML
+    - LLM prompts receive only 32KB snippets, not the whole page
+    - Regex is applied to the full content using pure Python (no token limits)
+    - Defensive memory cap of 1MB for storage, but this rarely matters in practice
+    - Very large pages work fine due to the snippet-based architecture
 
 11. **Session Isolation**
     - Each scraping task is independent

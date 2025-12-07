@@ -170,14 +170,18 @@ Generates regular expressions to extract structured data from HTML/JSON content 
 
 ### Snippet Strategy
 
-The system uses a **multi-layer snippet approach** to handle large pages efficiently:
+The system **never sends full HTML to the LLM**. Instead, it extracts focused snippets:
 
 | Snippet Type | Size | Purpose |
 |--------------|------|---------|
-| `inner_text` | 32KB max | Clean text sent to LLM for example finding |
-| `best_snippet` | 4000 chars | Large context around target for fallback |
-| `micro_snippet` | 150 chars | Focused HTML context for precise regex generation |
+| Full content | Unlimited | Kept for regex application (pure Python, no LLM) |
+| LLM text prompt | 32KB max | Clean text sent to LLM for example finding |
+| Attribute prompt | 15KB max | HTML snippets for URL/attribute extraction |
 | `extract_snippet_around_example()` | 600 chars default | Line-aware extraction preserving example intact |
+| `micro_snippet` | 150 chars | Focused HTML context for precise regex generation |
+| `best_snippet` | 4000 chars | Larger context as fallback |
+
+This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page.
 
 ### System Prompt
 
