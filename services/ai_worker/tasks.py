@@ -456,11 +456,23 @@ def _prepare_search_content(inner_text: str, raw_content: str) -> Dict[str, str]
     }
 
 
-def _check_cached_parser(db, domain: str, keywords: List[str], search_content: str) -> Dict[str, Any]:
-    """Check for and apply cached parser."""
+def _check_cached_parser(db, domain: str, keywords: List[str], search_content: str, source_type: str = None) -> Dict[str, Any]:
+    """Check for and apply cached parser.
+    
+    Args:
+        db: Database session
+        domain: Domain to search parsers for
+        keywords: Keywords to match against parser intent
+        search_content: Content to apply regex on
+        source_type: Optional filter for parser source type (e.g., 'ATTRIBUTE', 'CONTENT')
+    """
     parsers = db_utils.find_cached_parser(db, domain, keywords=keywords)
     
     for p in parsers:
+        # Filter by source_type if specified
+        if source_type and p.source_type != source_type:
+            continue
+            
         patt, fl = _decompose_stored_regex(cast(str, p.generated_regex))
         matches = _apply_regex_matches(patt, fl, search_content)
         if matches:
@@ -719,7 +731,7 @@ Example output: {{"regex": "<span class=\\"price\\">\\\\$([\\\\d.]+)</span>", "f
 def _run_schema_extraction_with_cache(
     task_id: str, url: str, schema_fields: List[str], inner_text: str, 
     html_content: str, llm: LLMClient, db, domain: str
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], bool]:
     """Extract data with LLM, then generate and cache regexes for reuse.
     
     Hybrid approach:
@@ -727,6 +739,9 @@ def _run_schema_extraction_with_cache(
     2. Generate regex patterns based on extracted values
     3. Cache the patterns for future requests
     4. Future requests: Use cached regex (no LLM needed)
+    
+    Returns:
+        Tuple of (extracted_data, used_cached_parser)
     """
     import re
     
@@ -797,7 +812,12 @@ def _run_schema_extraction_with_cache(
                     
                     if extracted_data:
                         _log_event(task_id, "schema_cache_hit", parser_id=parser.id, record_count=len(extracted_data))
-                        return extracted_data
+                        # Update parser usage stats
+                        try:
+                            db_utils.update_parser_usage(db, parser.id)
+                        except Exception as e:
+                            _log_event(task_id, "update_parser_usage_failed", error=str(e))
+                        return extracted_data, True  # Cache was used
             
         except Exception as e:
             logger.warning(f"Failed to apply cached schema parser: {e}")
@@ -857,7 +877,7 @@ Return ONLY the JSON, no other text."""
         
         if parsed_data is None:
             _log_event(task_id, "schema_extraction_failed", error="Could not parse JSON response")
-            return []
+            return [], False
         
         # Normalize to list of records
         records = []
@@ -945,62 +965,174 @@ Return ONLY the JSON, no other text."""
         if extracted_data:
             _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
         
-        return extracted_data
+        return extracted_data, False  # Not from cache - newly extracted
             
     except Exception as e:
         _log_event(task_id, "schema_extraction_failed", error=str(e))
         logger.exception("Schema extraction failed")
     
-    return []
+    return [], False
 
 
 def _run_schema_extraction(
     task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
 ) -> List[Dict[str, Any]]:
     """Wrapper for backwards compatibility - calls the new function without caching."""
-    return _run_schema_extraction_with_cache(
+    result, _ = _run_schema_extraction_with_cache(
         task_id, "", schema_fields, inner_text, html_content, llm, None, ""
     )
+    return result
 
 
 def _run_attribute_extraction(
-    task_id: str, _url: str, intent: Dict, text_examples: List[str],
-    html_content: str, llm: LLMClient, _db
+    task_id: str, url: str, intent: Dict, text_examples: List[str],
+    html_content: str, llm: LLMClient, db
 ) -> List[Dict[str, Any]]:
-    """Extract attributes from HTML using text examples as anchors.
+    """Extract attributes from HTML using unified regex approach with caching.
     
-    This is a generic extraction for when source_type is 'attribute'.
-    We use the text examples (visible text) to find corresponding attribute values.
+    Uses the same regex generation and caching pipeline as content extraction,
+    but optimized for attribute values (href, src, etc.).
     """
+    import re as _re
+    
     target = intent.get("target", "") or "target data"
-    attribute = intent.get("target_attribute", "") or "href" # default to href if missing
+    attribute = intent.get("target_attribute", "") or "href"  # default to href if missing
+    domain = urlparse(url).netloc
     
     _log_event(task_id, "attribute_extraction_start", attribute=attribute, text_examples=text_examples[:3])
     
-    # First try: Simple regex-based extraction
-    values = _extract_attribute_from_html_by_text(html_content, text_examples, attribute)
-    _log_event(task_id, "attribute_extraction_regex", found_count=len(values))
+    # Step 1: Check for cached ATTRIBUTE parser first
+    cache_result = _check_cached_parser(db, domain, intent.get("keywords", []), html_content, source_type="ATTRIBUTE")
+    if cache_result["used_cached"] and cache_result["matches"]:
+        _log_event(task_id, "attribute_using_cached_parser", parser_id=cache_result["used_parser"].id, match_count=len(cache_result["matches"]))
+        # Update parser usage stats
+        db_utils.update_parser_usage(db, cache_result["used_parser"].id)
+        return [{"text": v, "source": "cached_attribute_regex", "confidence": 1.0} for v in cache_result["matches"]]
     
-    # If regex approach didn't find enough, try LLM
-    if len(values) < len(text_examples) // 2:
-        _log_event(task_id, "attribute_extraction_llm_fallback")
-        llm_values = _extract_attribute_via_llm(html_content, text_examples, target, attribute, llm)
-        # Merge, avoiding duplicates
-        seen = set(values)
-        for v in llm_values:
-            if v not in seen:
-                values.append(v)
-                seen.add(v)
+    # Step 2: Generate STRUCTURAL regex for attribute extraction via LLM
+    # Key: The regex must match the HTML STRUCTURE, not the specific text content!
+    _log_event(task_id, "attribute_generating_regex")
+    
+    # Find HTML snippets containing the text examples for context
+    snippets = []
+    for ex in text_examples[:5]:
+        idx = html_content.lower().find(ex.lower())
+        if idx != -1:
+            snippet = _extract_snippet(html_content, idx, len(ex), context=500)
+            snippets.append(snippet)
+    
+    if not snippets:
+        snippets = [html_content[:15000]]
+    
+    combined_snippet = "\n---\n".join(snippets[:3])[:15000]
+    
+    # Ask LLM to generate a STRUCTURAL regex - NOT content-based!
+    regex_prompt = (
+        f"Analyze this HTML and generate a regex to extract '{attribute}' attribute values for '{target}'.\n\n"
+        f"CRITICAL REQUIREMENTS:\n"
+        f"1. The regex must match the HTML STRUCTURE/PATTERN, NOT the specific text content\n"
+        f"2. DO NOT include any specific text like job titles, names, or dynamic content in the regex\n"
+        f"3. Match based on: tag names, CSS classes, parent elements, attribute patterns\n"
+        f"4. The regex should work even when the page content changes (new jobs, products, etc.)\n"
+        f"5. Capture ONLY the '{attribute}' attribute value\n\n"
+        f"Example of WRONG regex: <a href=\"([^\"]+)\"[^>]*>.*?Senior Developer.*?</a>\n"
+        f"Example of CORRECT regex: <a[^>]*class=\"job-link\"[^>]*href=\"([^\"]+)\"[^>]*>\n\n"
+        f"The visible text in target elements includes (for context only, DO NOT embed in regex):\n"
+        f"{text_examples[:3]}\n\n"
+        f"HTML SAMPLE:\n{combined_snippet}\n\n"
+        f"Analyze the HTML structure around these elements and create a STRUCTURAL pattern.\n"
+        f"Return ONLY a JSON object:\n"
+        f'{{"regex": "structural_pattern", "flags": "is", "explanation": "what structural pattern you identified"}}'
+    )
+    
+    pattern = None
+    flags = "is"
+    
+    try:
+        resp = llm.generate_text(regex_prompt, extra_params={"response_format": {"type": "json_object"}})
+        data = _json.loads(resp)
+        pattern = data.get("regex")
+        flags = data.get("flags", "is")
+        _log_event(task_id, "attribute_regex_generated", pattern=pattern[:100] if pattern else None)
+        
+        # VALIDATION: Reject patterns that contain specific example text (content-bound)
+        if pattern:
+            pattern_lower = pattern.lower()
+            for ex in text_examples[:5]:
+                # Check if any significant part of the example text is embedded in the regex
+                ex_words = [w for w in ex.lower().split() if len(w) > 4]  # Words > 4 chars
+                for word in ex_words:
+                    if word in pattern_lower and word not in ('href', 'class', 'data', 'link', 'item'):
+                        _log_event(task_id, "attribute_regex_rejected_content_bound", 
+                                   pattern=pattern[:80], embedded_word=word)
+                        pattern = None  # Reject this pattern, fall back to heuristic
+                        break
+                if pattern is None:
+                    break
+                    
+    except Exception as e:
+        _log_event(task_id, "attribute_regex_generation_failed", error=str(e))
+    
+    extracted_values = []
+    used_pattern = None
+    
+    # Step 3: Try LLM-generated STRUCTURAL regex first (only if it passed validation)
+    if pattern:
+        matches = _apply_regex_matches(pattern, flags, html_content)
+        if matches:
+            extracted_values = matches
+            used_pattern = pattern
+            _log_event(task_id, "attribute_llm_regex_success", match_count=len(matches))
+    
+    # Step 4: Fallback to simple heuristic regex if LLM pattern failed
+    if not extracted_values:
+        _log_event(task_id, "attribute_fallback_to_heuristic")
+        extracted_values = _extract_attribute_from_html_by_text(html_content, text_examples, attribute)
+        if extracted_values:
+            # DON'T cache overly generic patterns - they require LLM filtering anyway
+            # Mark as heuristic-based (not worth caching)
+            used_pattern = None  # Don't cache generic patterns
+            _log_event(task_id, "attribute_heuristic_success", match_count=len(extracted_values))
+    
+    # Step 5: Final fallback to LLM direct extraction
+    if not extracted_values:
+        _log_event(task_id, "attribute_fallback_to_llm_direct")
+        extracted_values = _extract_attribute_via_llm(html_content, text_examples, target, attribute, llm)
     
     extracted_data = []
-    if values:
-        # Filter values via LLM to remove noise (images, bad links) based on target
-        # This avoids hardcoded rules about SVGs etc.
-        filtered_values = _filter_values_via_llm(values, target, llm)
-        
+    if extracted_values:
+        # Filter values via LLM to remove noise
+        filtered_values = _filter_values_via_llm(extracted_values, target, llm)
         unique_values = list(dict.fromkeys(filtered_values))  # Preserve order, dedupe
-        extracted_data = [{"text": v, "source": f"{attribute}_extraction", "confidence": 0.95} for v in unique_values]
-        _log_event(task_id, "attribute_extraction_success", count=len(unique_values))
+        
+        if unique_values:
+            # Only cache STRUCTURAL patterns (LLM-generated that passed validation)
+            # Don't cache generic heuristic patterns that need LLM filtering
+            if used_pattern and len(unique_values) >= 1:
+                # Verify pattern is specific enough (has class, id, or specific tag attributes)
+                is_specific = any(x in used_pattern.lower() for x in ['class=', 'id=', 'data-', 'role=', 'type='])
+                if is_specific:
+                    try:
+                        db_utils.record_new_parser(
+                            db,
+                            task_id=task_id,
+                            url=url,
+                            intent=intent,
+                            pattern=used_pattern,
+                            flags=flags,
+                            matches_count=len(unique_values),
+                            source_type="ATTRIBUTE",
+                            sample_input=combined_snippet[:2000],
+                            sample_output=[{"text": v, "attribute": attribute} for v in unique_values[:5]]
+                        )
+                        _log_event(task_id, "attribute_parser_cached", pattern=used_pattern[:80])
+                    except Exception as e:
+                        _log_event(task_id, "attribute_parser_cache_failed", error=str(e))
+                else:
+                    _log_event(task_id, "attribute_pattern_too_generic_not_cached", pattern=used_pattern[:80])
+            
+            extracted_data = [{"text": v, "source": f"{attribute}_regex", "confidence": 0.95} for v in unique_values]
+            _log_event(task_id, "attribute_extraction_success", count=len(unique_values))
     else:
         _log_event(task_id, "attribute_extraction_failed", text_example_count=len(text_examples))
     
@@ -1178,10 +1310,10 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         text_content = content["text_content"]
         search_content = content["search_content"]
 
-        # Check for cached parser (skip for attribute targets as they use different approach)
+        # Check for cached parser (now unified for both content and attribute targets)
         cache_result = {"used_parser": None, "matches": [], "used_cached": False}
-        if not is_attribute_target:
-            cache_result = _check_cached_parser(db, domain, keywords, search_content)
+        source_type_filter = "ATTRIBUTE" if is_attribute_target else None
+        cache_result = _check_cached_parser(db, domain, keywords, search_content if not is_attribute_target else html_content, source_type=source_type_filter)
         used_parser = cache_result["used_parser"]
         used_cached = cache_result["used_cached"]
         
@@ -1190,14 +1322,23 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # SCHEMA-BASED EXTRACTION (highest priority)
         if is_schema_extraction and schema_fields:
             _log_event(task_id, "using_schema_extraction", fields=schema_fields)
-            extracted_data = _run_schema_extraction_with_cache(
+            schema_result = _run_schema_extraction_with_cache(
                 task_id, url, schema_fields, inner_text, html_content, llm, db, domain
             )
+            extracted_data, schema_used_cache = schema_result
+            if schema_used_cache:
+                used_cached = True  # Mark that cached parser was used
             if extracted_data:
                 _log_event(task_id, "schema_extraction_complete", count=len(extracted_data))
         
         if cache_result["matches"] and not extracted_data:
             extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
+            # Update parser usage stats when cache is used
+            if cache_result["used_parser"]:
+                try:
+                    db_utils.update_parser_usage(db, cache_result["used_parser"].id)
+                except Exception as e:
+                    _log_event(task_id, "update_parser_usage_failed", error=str(e))
         elif not extracted_data:
             # UNIVERSAL EXTRACTION PIPELINE
             # Flow depends on target type:

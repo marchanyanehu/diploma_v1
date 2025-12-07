@@ -396,3 +396,34 @@ def delete_scheduled_job(db: Session, job_id: int, owner_id: int) -> bool:
         db.commit()
         return True
     return False
+
+
+def update_parser_usage(db: Session, parser_id: int, success: bool = True) -> None:
+    """Update usage statistics for a parser when it's used.
+    
+    Increments times_used, updates last_used_at, and adjusts confidence_score based on success.
+    """
+    parser = db.query(ParserCache).filter(ParserCache.id == parser_id).first()
+    if not parser:
+        return
+    
+    update_data: Dict[Any, Any] = {
+        ParserCache.times_used: ParserCache.times_used + 1,
+        ParserCache.last_used_at: datetime.now(timezone.utc),
+    }
+    
+    # Adjust success rate based on outcome
+    if success:
+        # Slightly increase confidence on success (max 100)
+        new_confidence = min(100, parser.confidence_score + 1)
+        new_success_rate = min(100, parser.success_rate + 1)
+    else:
+        # Decrease confidence on failure
+        new_confidence = max(0, parser.confidence_score - 5)
+        new_success_rate = max(0, parser.success_rate - 10)
+    
+    update_data[ParserCache.confidence_score] = new_confidence
+    update_data[ParserCache.success_rate] = new_success_rate
+    
+    db.query(ParserCache).filter(ParserCache.id == parser_id).update(update_data)
+    db.commit()
