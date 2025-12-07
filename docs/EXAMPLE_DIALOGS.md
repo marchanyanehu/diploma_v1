@@ -44,10 +44,10 @@ Content-Type: application/json
   "url": "https://careers.example.com/jobs",
   "prompt": "I want all job titles and their locations",
   "data": [
-    {"text": "Senior Software Engineer — Berlin, Germany"},
-    {"text": "Product Manager — London, UK"},
-    {"text": "Data Scientist — New York, USA"},
-    {"text": "DevOps Engineer — Remote"}
+    {"text": "Senior Software Engineer — Berlin, Germany", "source": "generated_regex", "confidence": 0.9},
+    {"text": "Product Manager — London, UK", "source": "generated_regex", "confidence": 0.9},
+    {"text": "Data Scientist — New York, USA", "source": "generated_regex", "confidence": 0.9},
+    {"text": "DevOps Engineer — Remote", "source": "generated_regex", "confidence": 0.9}
   ],
   "metadata": {
     "total_matches": 4,
@@ -83,10 +83,10 @@ Content-Type: application/json
   "url": "https://shop.example.com/electronics",
   "prompt": "Get me all product prices",
   "data": [
-    {"text": "$299.99"},
-    {"text": "$149.50"},
-    {"text": "$599.00"},
-    {"text": "$79.99"}
+    {"text": "$299.99", "source": "generated_regex", "confidence": 0.9},
+    {"text": "$149.50", "source": "generated_regex", "confidence": 0.9},
+    {"text": "$599.00", "source": "generated_regex", "confidence": 0.9},
+    {"text": "$79.99", "source": "generated_regex", "confidence": 0.9}
   ],
   "metadata": {
     "total_matches": 4,
@@ -118,9 +118,9 @@ Content-Type: application/json
   "task_id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
   "status": "SUCCESS",
   "data": [
-    {"text": "https://news.example.com/article/breaking-news-today"},
-    {"text": "https://news.example.com/article/tech-update-2025"},
-    {"text": "https://news.example.com/article/sports-finals"}
+    {"text": "https://news.example.com/article/breaking-news-today", "source": "href_extraction", "confidence": 0.95},
+    {"text": "https://news.example.com/article/tech-update-2025", "source": "href_extraction", "confidence": 0.95},
+    {"text": "https://news.example.com/article/sports-finals", "source": "href_extraction", "confidence": 0.95}
   ],
   "metadata": {
     "total_matches": 3,
@@ -153,14 +153,28 @@ Content-Type: application/json
   "task_id": "d4e5f6a7-b8c9-0123-defa-456789012345",
   "status": "SUCCESS",
   "data": [
-    {"text": "France\nCapital: Paris\nPopulation: 67,390,000\nArea: 640,679 km²"},
-    {"text": "Germany\nCapital: Berlin\nPopulation: 83,240,000\nArea: 357,386 km²"},
-    {"text": "Japan\nCapital: Tokyo\nPopulation: 125,800,000\nArea: 377,975 km²"}
+    {
+      "text": "name: France | capital: Paris | population: 67,390,000 | area: 640,679 km²",
+      "fields": {"name": "France", "capital": "Paris", "population": "67,390,000", "area": "640,679 km²"},
+      "source": "schema_extraction",
+      "confidence": 0.9
+    },
+    {
+      "text": "name: Germany | capital: Berlin | population: 83,240,000 | area: 357,386 km²",
+      "fields": {"name": "Germany", "capital": "Berlin", "population": "83,240,000", "area": "357,386 km²"},
+      "source": "schema_extraction",
+      "confidence": 0.9
+    },
+    {
+      "text": "name: Japan | capital: Tokyo | population: 125,800,000 | area: 377,975 km²",
+      "fields": {"name": "Japan", "capital": "Tokyo", "population": "125,800,000", "area": "377,975 km²"},
+      "source": "schema_extraction",
+      "confidence": 0.9
+    }
   ],
   "metadata": {
     "total_matches": 3,
-    "used_cached_parser": false,
-    "extraction_mode": "structured"
+    "used_cached_parser": false
   }
 }
 ```
@@ -187,14 +201,13 @@ Content-Type: application/json
   "task_id": "e5f6a7b8-c9d0-1234-efab-567890123456",
   "status": "SUCCESS",
   "data": [
-    {"text": "https://jobs.techcompany.com/apply/senior-engineer-12345"},
-    {"text": "https://jobs.techcompany.com/apply/product-manager-67890"},
-    {"text": "https://jobs.techcompany.com/apply/data-analyst-11111"}
+    {"text": "https://jobs.techcompany.com/apply/senior-engineer-12345", "source": "href_extraction", "confidence": 0.95},
+    {"text": "https://jobs.techcompany.com/apply/product-manager-67890", "source": "href_extraction", "confidence": 0.95},
+    {"text": "https://jobs.techcompany.com/apply/data-analyst-11111", "source": "href_extraction", "confidence": 0.95}
   ],
   "metadata": {
     "total_matches": 3,
-    "source_type": "attribute",
-    "target_attribute": "href"
+    "used_cached_parser": false
   }
 }
 ```
@@ -228,9 +241,9 @@ POST /api/v1/process
   "task_id": "f6a7b8c9-d0e1-2345-fabc-678901234567",
   "status": "SUCCESS",
   "data": [
-    {"text": "$999.99"},
-    {"text": "$1,299.00"},
-    {"text": "$799.50"}
+    {"text": "$999.99", "source": "cached_regex", "confidence": 1.0},
+    {"text": "$1,299.00", "source": "cached_regex", "confidence": 1.0},
+    {"text": "$799.50", "source": "cached_regex", "confidence": 1.0}
   ],
   "metadata": {
     "total_matches": 3,

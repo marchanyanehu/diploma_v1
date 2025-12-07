@@ -55,10 +55,13 @@ This document describes the known limitations and constraints of the Intelligent
    - LLM API rate limits from providers (Gemini/OpenAI) apply
    - High-volume scraping not recommended
 
-10. **Maximum Content Size**
-    - Pages larger than ~1MB may be truncated
-    - Very long pages may exceed LLM context limits
-    - Network response previews limited to 50KB per request
+10. **Content Processing Strategy**
+    - Pages are processed using a **snippet-based approach** to avoid LLM token limits
+    - Inner text is limited to 1MB (1,000,000 characters) before processing
+    - LLM prompts receive 32KB (32,768 characters) of content maximum
+    - Regex generation uses focused 600-character snippets around target examples
+    - Micro-snippets (150 chars) are used for precise HTML context
+    - Very large pages work fine due to snippet extraction strategy
 
 11. **Session Isolation**
     - Each scraping task is independent

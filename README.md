@@ -2,10 +2,31 @@
 
 A microservice-based web scraping system powered by LLMs to intelligently extract structured data from websites using natural language queries.
 
+## Target Audience & Use Cases
+
+### Who Is This For?
+
+| Audience | Use Case |
+|----------|----------|
+| **Data Analysts** | Extract tabular data from websites without coding |
+| **Market Researchers** | Collect competitor pricing, product listings |
+| **Recruiters / HR** | Aggregate job postings from multiple career pages |
+| **Journalists** | Gather public records, event listings, statistics |
+| **Developers** | Build automated data pipelines via API integration |
+
+### Example Scenarios
+
+1. **E-commerce Monitoring**: "Extract all product names and prices from the sale section"
+2. **Job Aggregation**: "Get job titles and locations for remote positions"
+3. **News Collection**: "Find all article headlines with publication dates"
+4. **Real Estate**: "Extract property prices and addresses from listings"
+5. **Event Tracking**: "Get event names, dates, and venues from the calendar"
+
 ## Documentation
 
 -   📐 [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
 -   🤖 [AI Prompts](docs/AI_PROMPTS.md) - Prompt engineering documentation
+-   📖 [User Guide](docs/USER_GUIDE.md) - Step-by-step usage instructions
 -   ⚠️ [System Limitations](docs/SYSTEM_LIMITATIONS.md) - What the system cannot do
 -   💬 [Example Dialogs](docs/EXAMPLE_DIALOGS.md) - 15+ usage examples and test scenarios
 
