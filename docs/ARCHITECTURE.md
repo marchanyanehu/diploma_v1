@@ -59,8 +59,34 @@ The system never sends full HTML to the LLM. Instead, it uses focused snippets:
 
 ## Database Schema
 
--   **Users**: Authentication info.
--   **ScrapingTasks**: Tracks status, raw content, and final results.
--   **ScheduledJobs**: Cron schedules linked to users.
--   **ParserCache**: Stores successful RegEx patterns for reuse (optimization).
+-   **Users**: Authentication info (username, hashed_password, email, is_active).
+-   **ScrapingTasks**: Tracks status, raw content, intent, and final results.
+-   **ScheduledJobs**: Cron schedules linked to users (url, prompt, schedule_cron).
+-   **ParserCache**: Stores successful RegEx patterns for reuse (domain, keywords, regex, confidence).
+
+See `reference_docs/DB/data_dictionary.md` for full schema details and ER diagram.
+
+## Services Overview
+
+| Service | Container | Queue | Purpose |
+|---------|-----------|-------|---------|
+| **API** | `diploma_api` | - | FastAPI REST endpoints, auth, task creation |
+| **Headless Worker** | `diploma_headless_worker` | `fetching_queue` | Playwright page fetching |
+| **AI Worker** | `diploma_ai_worker` | `ai_queue` | Intent extraction, regex generation |
+| **Scheduler** | `diploma_scheduler` | Celery Beat | Enqueue due scheduled jobs |
+| **PostgreSQL** | `diploma_postgres` | - | Data persistence |
+| **Redis** | `diploma_redis` | - | Task queue broker, rate limit storage |
+
+## Technology Stack
+
+| Component | Technology | Version |
+|-----------|------------|---------|
+| Web Framework | FastAPI | 0.111+ |
+| Task Queue | Celery | 5.4+ |
+| Message Broker | Redis | 7 |
+| Database | PostgreSQL | 15 |
+| Browser Automation | Playwright | 1.44+ |
+| LLM Abstraction | LiteLLM | 1.52+ |
+| Auth | JWT (python-jose) + bcrypt | - |
+| Rate Limiting | slowapi | 0.1.9+ |
 

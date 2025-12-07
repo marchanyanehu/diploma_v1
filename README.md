@@ -134,9 +134,13 @@ Once running, visit: `http://localhost:8000/docs`.
 
 -   **Run Tests**:
     ```bash
+    # Inside Docker
     docker-compose exec api pytest tests/
+    
+    # Or locally with virtual environment
+    pytest tests/ -v
     ```
--   **Linting**:
+-   **Run Specific Test Files**:
     ```bash
-    ruff check .
+    pytest tests/test_input_sanitization.py tests/test_intent_extraction.py -v
     ```
