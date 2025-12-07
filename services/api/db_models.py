@@ -3,9 +3,15 @@ SQLAlchemy database models for the Intelligent Web Data Aggregator.
 
 This module defines the database schema using SQLAlchemy ORM models.
 These models represent the persistent data structures for tasks, cached parsers, and users.
+
+Normalization to 3NF:
+- Domains extracted to lookup table (eliminates derivable domain from URL)
+- Task source data separated (reduces row size for frequent task queries)
+- Intent data normalized (reusable across tasks)
+- Parser samples separated (large blobs isolated)
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -17,6 +23,9 @@ from .database import Base
 class User(Base):
     """
     Model for storing user authentication data.
+    1NF: Atomic values, unique rows via PK
+    2NF: All non-key attributes depend on full PK
+    3NF: No transitive dependencies
     """
     __tablename__ = "users"
 
@@ -34,13 +43,90 @@ class User(Base):
         return f"<User(id={self.id}, username='{self.username}')>"
 
 
+class Domain(Base):
+    """
+    Lookup table for domains (3NF normalization).
+    Eliminates repeated domain strings and derivable domain from URL.
+    """
+    __tablename__ = "domains"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)  # e.g., "example.com"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    parsers = relationship("ParserCache", back_populates="domain_ref")
+    
+    def __repr__(self) -> str:
+        return f"<Domain(id={self.id}, name='{self.name}')>"
+
+
+class TaskIntent(Base):
+    """
+    Normalized intent data extracted from user prompts.
+    Separated to allow intent reuse and reduce ScrapingTask row size.
+    3NF: All attributes depend only on PK, no transitive dependencies.
+    """
+    __tablename__ = "task_intents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    target = Column(Text, nullable=True)  # e.g., "job listings", "prices"
+    keywords = Column(JSON, nullable=True)  # ["python", "developer", "remote"]
+    schema_fields = Column(JSON, nullable=True)  # ["title", "salary", "location"]
+    constraints = Column(JSON, nullable=True)  # ["salary > $100k"]
+    output_shape = Column(Text, nullable=True)  # "list of job titles with salaries"
+    confidence = Column(Float, nullable=True)  # 0.0-1.0
+    normalized_hash = Column(String(64), nullable=True, index=True)  # For matching similar intents
+    
+    # Source extraction hints
+    source_type = Column(String(50), nullable=True)  # 'content', 'attribute', 'schema'
+    target_attribute = Column(String(50), nullable=True)  # 'href', 'src', etc.
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # Relationships
+    tasks = relationship("ScrapingTask", back_populates="intent")
+    
+    def __repr__(self) -> str:
+        return f"<TaskIntent(id={self.id}, target='{self.target}')>"
+
+
+class TaskSourceData(Base):
+    """
+    Large source data blobs separated from main task table.
+    Reduces ScrapingTask row size for frequent status queries.
+    One-to-one with ScrapingTask.
+    """
+    __tablename__ = "task_source_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("scraping_tasks.id"), unique=True, nullable=False)
+    
+    # Raw page content (can be large)
+    page_content = Column(Text, nullable=True)  # innerText from page
+    html_content = Column(Text, nullable=True)  # Full HTML if stored
+    
+    # Network data
+    network_requests = Column(JSON, nullable=True)  # Captured XHR/fetch requests
+    
+    # Chosen source details
+    chosen_source_url = Column(Text, nullable=True)
+    
+    # Relationship
+    task = relationship("ScrapingTask", back_populates="source_data")
+    
+    def __repr__(self) -> str:
+        return f"<TaskSourceData(task_id={self.task_id})>"
+
+
 class ScrapingTask(Base):
     """
     Model for storing scraping task information and status.
     
-    This table tracks all scraping requests, their status, and results.
-    Each task represents a user request to scrape data from a specific URL
-    with a natural language prompt.
+    3NF Normalized:
+    - Large blobs moved to TaskSourceData (one-to-one)
+    - Intent data moved to TaskIntent (many-to-one, allows reuse)
+    - All remaining attributes depend only on task PK
     """
     
     __tablename__ = "scraping_tasks"
@@ -73,35 +159,52 @@ class ScrapingTask(Base):
     processing_time_seconds = Column(Integer, nullable=True)
     used_cached_parser = Column(Boolean, default=False, nullable=False)
     
-    # Source data captured during scraping
-    page_content = Column(Text, nullable=True)  # Raw page content (innerText)
-    network_requests = Column(JSON, nullable=True)  # Captured network requests
-
-    # Intent & source mapping (added migration 0002)
-    intent_target = Column(Text, nullable=True)
-    intent_keywords = Column(JSON, nullable=True)
-    chosen_source_url = Column(Text, nullable=True)
-    chosen_source_type = Column(String(50), nullable=True)
+    # Relationships (normalized)
+    intent_id = Column(Integer, ForeignKey("task_intents.id"), nullable=True)
+    intent = relationship("TaskIntent", back_populates="tasks")
     
-    # Relationships
     used_parser_id = Column(Integer, ForeignKey("parsers_cache.id"), nullable=True)
     used_parser = relationship("ParserCache", back_populates="tasks")
 
-    # Owner
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     owner = relationship("User", back_populates="tasks")
     
+    # One-to-one with source data
+    source_data = relationship("TaskSourceData", back_populates="task", uselist=False)
+    
     def __repr__(self) -> str:
         return f"<ScrapingTask(id={self.id}, task_id='{self.task_id}', status='{self.status}')>"
+
+
+class ParserSample(Base):
+    """
+    Sample input/output data for parser validation.
+    Separated from ParserCache to reduce row size.
+    One-to-one with ParserCache.
+    """
+    __tablename__ = "parser_samples"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    parser_id = Column(Integer, ForeignKey("parsers_cache.id"), unique=True, nullable=False)
+    
+    sample_input = Column(Text, nullable=True)  # Sample source content
+    sample_output = Column(JSON, nullable=True)  # Expected extraction results
+    
+    # Relationship
+    parser = relationship("ParserCache", back_populates="samples")
+    
+    def __repr__(self) -> str:
+        return f"<ParserSample(parser_id={self.parser_id})>"
 
 
 class ParserCache(Base):
     """
     Model for caching successful regex parsers.
     
-    This table stores validated regular expressions that have been successfully
-    generated by the LLM and tested against real data. These cached parsers
-    can be reused for similar requests to avoid redundant LLM API calls.
+    3NF Normalized:
+    - Domain extracted to Domain lookup table (eliminates transitive dependency)
+    - Sample data moved to ParserSample (reduces row size)
+    - All remaining attributes depend only on parser PK
     """
     
     __tablename__ = "parsers_cache"
@@ -110,58 +213,59 @@ class ParserCache(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # URL pattern matching
-    url_pattern = Column(String(500), nullable=False, index=True)  # Pattern or exact URL
-    domain = Column(String(255), nullable=False, index=True)  # Extracted domain for faster lookups
+    url_pattern = Column(String(500), nullable=False, index=True)
+    
+    # Domain reference (normalized - was derived from url_pattern, violating 3NF)
+    domain_id = Column(Integer, ForeignKey("domains.id"), nullable=False)
+    domain_ref = relationship("Domain", back_populates="parsers")
     
     # User intent matching
-    user_intent = Column(Text, nullable=False)  # Normalized/processed user prompt
-    intent_keywords = Column(JSON, nullable=True)  # Extracted keywords for matching
-    target_data_type = Column(String(100), nullable=True)  # e.g., "job_listings", "product_prices"
-    normalized_intent_hash = Column(String(64), nullable=True, index=True)  # SHA1 or similar of normalized intent+keywords
-    keyword_set = Column(JSON, nullable=True)  # canonical lowercase sorted unique keywords for fast overlap
+    user_intent = Column(Text, nullable=False)  # Normalized user prompt
+    intent_keywords = Column(JSON, nullable=True)  # Keywords for matching
+    target_data_type = Column(String(100), nullable=True)  # "job_listings", "prices"
+    normalized_intent_hash = Column(String(64), nullable=True, index=True)
+    keyword_set = Column(JSON, nullable=True)  # Canonical keywords for overlap
     
     # Parser information
-    generated_regex = Column(Text, nullable=False)  # The working regular expression
-    source_type = Column(String(50), nullable=False)  # 'HTML', 'JSON', 'XML', etc.
-    source_identifier = Column(Text, nullable=True)  # URL of XHR request or selector for HTML
+    generated_regex = Column(Text, nullable=False)
+    source_type = Column(String(50), nullable=False)  # 'HTML', 'JSON', 'XML', 'SCHEMA'
+    source_identifier = Column(Text, nullable=True)
     
-    # Validation and performance
-    test_matches_count = Column(Integer, nullable=False)  # Number of matches during validation
-    confidence_score = Column(Integer, default=100, nullable=False)  # 0-100, decreases with failed reuses
-    success_rate = Column(Integer, default=100, nullable=False)  # Percentage of successful reuses
-    times_used = Column(Integer, default=0, nullable=False)  # How many times this parser was reused
-    is_active = Column(Boolean, nullable=False, default=True)  # deactivated when confidence decays
+    # Validation and performance metrics
+    test_matches_count = Column(Integer, nullable=False)
+    confidence_score = Column(Integer, default=100, nullable=False)
+    success_rate = Column(Integer, default=100, nullable=False)
+    times_used = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
     
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
-    created_by_task_id = Column(String(255), nullable=False)  # Task that created this parser
+    created_by_task_id = Column(String(255), nullable=False)
     
-    # LLM generation context
-    llm_model_used = Column(String(100), nullable=True)  # e.g., "gpt-4", "claude-3"
-    generation_attempts = Column(Integer, default=1, nullable=False)  # How many attempts to generate
-    
-    # Sample data for validation
-    sample_input = Column(Text, nullable=True)  # Sample of the source content used for generation
-    sample_output = Column(JSON, nullable=True)  # Sample of expected extraction results
+    # LLM context
+    llm_model_used = Column(String(100), nullable=True)
+    generation_attempts = Column(Integer, default=1, nullable=False)
     
     # Relationships
     tasks = relationship("ScrapingTask", back_populates="used_parser")
+    samples = relationship("ParserSample", back_populates="parser", uselist=False)
     
     def __repr__(self) -> str:
-        return f"<ParserCache(id={self.id}, domain='{self.domain}', target='{self.target_data_type}')>"
+        return f"<ParserCache(id={self.id}, target='{self.target_data_type}')>"
 
 
 class ScheduledJob(Base):
     """
     Model for scheduled scraping tasks.
+    Already in 3NF - all attributes depend only on job PK.
     """
     __tablename__ = "scheduled_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
     url = Column(Text, nullable=False)
     prompt = Column(Text, nullable=False)
-    schedule_cron = Column(String(100), nullable=False) # e.g. "*/5 * * * *"
+    schedule_cron = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True)
     
     last_run_at = Column(DateTime(timezone=True), nullable=True)

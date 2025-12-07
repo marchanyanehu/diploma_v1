@@ -12,9 +12,22 @@ from datetime import datetime, timezone
 import hashlib
 import logging
 
-from .db_models import ScrapingTask, ParserCache, User, ScheduledJob
+from .db_models import (
+    ScrapingTask, ParserCache, User, ScheduledJob,
+    Domain, TaskSourceData, TaskIntent, ParserSample
+)
 
 logger = logging.getLogger(__name__)
+
+
+def get_or_create_domain(db: Session, domain_name: str) -> Domain:
+    """Get existing domain or create a new one."""
+    domain = db.query(Domain).filter(Domain.name == domain_name).first()
+    if not domain:
+        domain = Domain(name=domain_name)
+        db.add(domain)
+        db.flush()  # Get the ID without committing
+    return domain
 
 
 def create_user(db: Session, username: str, password_hash: str, email: Optional[str] = None) -> User:
@@ -68,9 +81,12 @@ def create_parser_cache(
     test_matches_count: int
 ) -> ParserCache:
     """Create a new parser cache entry."""
+    # Get or create the domain record
+    domain_record = get_or_create_domain(db, domain)
+    
     parser = ParserCache(
         url_pattern=url_pattern,
-        domain=domain,
+        domain_id=domain_record.id,
         user_intent=user_intent,
         generated_regex=generated_regex,
         source_type=source_type,
@@ -95,10 +111,12 @@ def find_cached_parser(
     
     Returns multiple candidates (ordered best-first) so caller can choose.
     """
+    # Join with domains table to filter by domain name
     q = (
         db.query(ParserCache)
+        .join(Domain, ParserCache.domain_id == Domain.id)
         .filter(
-            ParserCache.domain == domain,
+            Domain.name == domain,
             ParserCache.confidence_score >= confidence_threshold,
             ParserCache.is_active == True,  # noqa: E712
         )
@@ -153,6 +171,8 @@ def update_task_sources(
 
     This allows later debugging / iterative improvement even if regex generation
     fails. Truncates large blobs defensively.
+    
+    Uses normalized tables: TaskSourceData for page/network data, TaskIntent for intent data.
     """
     task = get_scraping_task(db, task_id)
     if not task:  # silently ignore if missing
@@ -160,34 +180,67 @@ def update_task_sources(
     MAX_PAGE_LEN = 500_000  # ~500 KB safeguard
     MAX_NETWORK_EVENTS = 100
     MAX_BODY_PREVIEW_LEN = 50_000
-    safe_page = None
-    if page_content is not None:
-        safe_page = page_content[:MAX_PAGE_LEN]
-    safe_network: List[Dict[str, Any]] | None = None
-    if network_requests is not None:
-        trimmed: List[Dict[str, Any]] = []
-        for ev in network_requests[:MAX_NETWORK_EVENTS]:
-            ev_copy = dict(ev)
-            body_prev = ev_copy.get("body_preview")
-            if isinstance(body_prev, str) and len(body_prev) > MAX_BODY_PREVIEW_LEN:
-                ev_copy["body_preview"] = body_prev[:MAX_BODY_PREVIEW_LEN]
-                ev_copy["body_truncated"] = True
-            trimmed.append(ev_copy)
-        safe_network = trimmed
-    update_data: Dict[Any, Any] = {}
-    if safe_page is not None:
-        update_data[ScrapingTask.page_content] = safe_page
-    if safe_network is not None:
-        update_data[ScrapingTask.network_requests] = safe_network
+    
+    # Update started_at on the main task if provided
     if started_at is not None:
-        update_data[ScrapingTask.started_at] = started_at
-    # Optionally persist intent keywords for quick reuse heuristics
+        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update({
+            ScrapingTask.started_at: started_at
+        })
+    
+    # Store page content and network requests in TaskSourceData table
+    if page_content is not None or network_requests is not None:
+        safe_page = None
+        if page_content is not None:
+            safe_page = page_content[:MAX_PAGE_LEN]
+        
+        safe_network: List[Dict[str, Any]] | None = None
+        if network_requests is not None:
+            trimmed: List[Dict[str, Any]] = []
+            for ev in network_requests[:MAX_NETWORK_EVENTS]:
+                ev_copy = dict(ev)
+                body_prev = ev_copy.get("body_preview")
+                if isinstance(body_prev, str) and len(body_prev) > MAX_BODY_PREVIEW_LEN:
+                    ev_copy["body_preview"] = body_prev[:MAX_BODY_PREVIEW_LEN]
+                    ev_copy["body_truncated"] = True
+                trimmed.append(ev_copy)
+            safe_network = trimmed
+        
+        # Check if TaskSourceData already exists for this task
+        existing_source = db.query(TaskSourceData).filter(TaskSourceData.task_id == task.id).first()
+        if existing_source:
+            # Update existing record
+            update_data: Dict[Any, Any] = {}
+            if safe_page is not None:
+                update_data[TaskSourceData.page_content] = safe_page
+            if safe_network is not None:
+                update_data[TaskSourceData.network_requests] = safe_network
+            if update_data:
+                db.query(TaskSourceData).filter(TaskSourceData.task_id == task.id).update(update_data)
+        else:
+            # Create new TaskSourceData record
+            task_source = TaskSourceData(
+                task_id=task.id,
+                page_content=safe_page,
+                network_requests=safe_network
+            )
+            db.add(task_source)
+    
+    # Store intent data in TaskIntent table
     if intent:
-        update_data[ScrapingTask.intent_target] = intent.get("target")
-        update_data[ScrapingTask.intent_keywords] = intent.get("keywords")
-    if update_data:
-        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update(update_data)
-        db.commit()
+        # Create new TaskIntent record (intents can be reused by multiple tasks)
+        task_intent = TaskIntent(
+            target=intent.get("target"),
+            keywords=intent.get("keywords")
+        )
+        db.add(task_intent)
+        db.flush()  # Get the ID
+        
+        # Link task to the intent
+        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update({
+            ScrapingTask.intent_id: task_intent.id
+        })
+    
+    db.commit()
 
 
 def persist_extraction_result(
@@ -237,19 +290,27 @@ def record_new_parser(
     sample_input: str | None,
     sample_output: List[Dict[str, Any]] | None,
 ) -> Optional[ParserCache]:
-    """Create a new ParserCache entry if pattern seems valid."""
+    """Create a new ParserCache entry if pattern seems valid.
+    
+    Uses normalized tables: Domain for domain lookup, ParserSample for sample data.
+    """
     try:
         from urllib.parse import urlparse
         parsed = urlparse(url)
-        domain = parsed.netloc
+        domain_name = parsed.netloc
+        
+        # Get or create domain record
+        domain_record = get_or_create_domain(db, domain_name)
+        
         # Compose final stored regex (embed flags inline if provided)
         if flags:
             stored_regex = f"(?{flags}:{pattern})"
         else:
             stored_regex = pattern
+        
         parser = ParserCache(
             url_pattern=url,
-            domain=domain,
+            domain_id=domain_record.id,
             user_intent=intent.get("target", intent.get("original_input", ""))[:255],
             intent_keywords=intent.get("keywords", [])[:25],
             target_data_type=intent.get("target", "")[:100],
@@ -260,12 +321,21 @@ def record_new_parser(
             source_identifier=url,
             test_matches_count=matches_count,
             created_by_task_id=task_id,
-            sample_input=(sample_input or "")[:5000],
-            sample_output=sample_output[:10] if sample_output else None,
             confidence_score=100,
             success_rate=100,
         )
         db.add(parser)
+        db.flush()  # Get the parser ID
+        
+        # Create sample record in ParserSample table if sample data provided
+        if sample_input or sample_output:
+            sample = ParserSample(
+                parser_id=parser.id,
+                sample_input=(sample_input or "")[:5000],
+                sample_output=sample_output[:10] if sample_output else None
+            )
+            db.add(sample)
+        
         db.commit()
         db.refresh(parser)
         return parser
