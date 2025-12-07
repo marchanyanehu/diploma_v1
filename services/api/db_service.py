@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from urllib.parse import urlparse
 
-from .db_models import ScrapingTask, ParserCache
+from .db_models import ScrapingTask, ParserCache, Domain, ParserSample
 from .database import get_db
 
 logger = logging.getLogger(__name__)
@@ -210,9 +210,16 @@ class DatabaseService:
             except Exception:
                 domain = "unknown"
         
+        # Get or create domain record (normalized schema)
+        domain_record = self.db.query(Domain).filter(Domain.name == domain).first()
+        if not domain_record:
+            domain_record = Domain(name=domain)
+            self.db.add(domain_record)
+            self.db.flush()  # Get the ID
+        
         parser = ParserCache(
             url_pattern=url_pattern,
-            domain=domain,
+            domain_id=domain_record.id,
             user_intent=user_intent,
             generated_regex=generated_regex,
             source_type=source_type,
@@ -222,12 +229,20 @@ class DatabaseService:
             intent_keywords=intent_keywords,
             target_data_type=target_data_type,
             llm_model_used=llm_model_used,
-            generation_attempts=generation_attempts,
-            sample_input=sample_input,
-            sample_output=sample_output
+            generation_attempts=generation_attempts
         )
         
         self.db.add(parser)
+        self.db.flush()  # Get parser ID for sample
+        
+        # Store sample data in ParserSample table (normalized)
+        if sample_input or sample_output:
+            sample = ParserSample(
+                parser_id=parser.id,
+                sample_input=sample_input[:5000] if sample_input else None,
+                sample_output=sample_output[:10] if sample_output else None
+            )
+            self.db.add(sample)
         self.db.commit()
         self.db.refresh(parser)
         logger.info(f"Created parser cache for domain: {domain}")
@@ -270,12 +285,13 @@ class DatabaseService:
             logger.info(f"Found exact URL match for parser: {exact_match.id}")
             return exact_match
         
-        # Then try domain-based matching with intent similarity
+        # Then try domain-based matching with intent similarity (using normalized domain table)
         domain_matches = (
             self.db.query(ParserCache)
+            .join(Domain, ParserCache.domain_id == Domain.id)
             .filter(
                 and_(
-                    ParserCache.domain == domain,
+                    Domain.name == domain,
                     ParserCache.confidence_score >= confidence_threshold
                 )
             )
@@ -400,10 +416,11 @@ class DatabaseService:
             .count()
         )
         
-        # Most popular domains
+        # Most popular domains (using normalized domain table)
         popular_domains = (
-            self.db.query(ParserCache.domain, func.count(ParserCache.id))
-            .group_by(ParserCache.domain)
+            self.db.query(Domain.name, func.count(ParserCache.id))
+            .join(ParserCache, ParserCache.domain_id == Domain.id)
+            .group_by(Domain.name)
             .order_by(func.count(ParserCache.id).desc())
             .limit(5)
             .all()
@@ -413,5 +430,5 @@ class DatabaseService:
             "total_parsers": total_parsers,
             "high_confidence_parsers": high_confidence,
             "recently_used_parsers": recently_used,
-            "popular_domains": [{"domain": domain, "count": count} for domain, count in popular_domains]
+            "popular_domains": [{"domain": domain_name, "count": count} for domain_name, count in popular_domains]
         }

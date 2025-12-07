@@ -163,6 +163,7 @@ def update_task_sources(
     task_id: str,
     *,
     page_content: Optional[str] = None,
+    html_content: Optional[str] = None,
     network_requests: Optional[List[Dict[str, Any]]] = None,
     intent: Optional[Dict[str, Any]] = None,
     started_at: Optional[datetime] = None,
@@ -187,11 +188,15 @@ def update_task_sources(
             ScrapingTask.started_at: started_at
         })
     
-    # Store page content and network requests in TaskSourceData table
-    if page_content is not None or network_requests is not None:
+    # Store page content, html content, and network requests in TaskSourceData table
+    if page_content is not None or html_content is not None or network_requests is not None:
         safe_page = None
         if page_content is not None:
             safe_page = page_content[:MAX_PAGE_LEN]
+        
+        safe_html = None
+        if html_content is not None:
+            safe_html = html_content[:MAX_PAGE_LEN]
         
         safe_network: List[Dict[str, Any]] | None = None
         if network_requests is not None:
@@ -212,6 +217,8 @@ def update_task_sources(
             update_data: Dict[Any, Any] = {}
             if safe_page is not None:
                 update_data[TaskSourceData.page_content] = safe_page
+            if safe_html is not None:
+                update_data[TaskSourceData.html_content] = safe_html
             if safe_network is not None:
                 update_data[TaskSourceData.network_requests] = safe_network
             if update_data:
@@ -221,16 +228,28 @@ def update_task_sources(
             task_source = TaskSourceData(
                 task_id=task.id,
                 page_content=safe_page,
+                html_content=safe_html,
                 network_requests=safe_network
             )
             db.add(task_source)
     
     # Store intent data in TaskIntent table
     if intent:
-        # Create new TaskIntent record (intents can be reused by multiple tasks)
+        # Create normalized hash for intent matching
+        intent_parts = [intent.get("target", ""), *(intent.get("keywords") or [])]
+        normalized_hash = hashlib.sha1("|".join(sorted(p for p in intent_parts if p)).encode("utf-8")).hexdigest()
+        
+        # Create new TaskIntent record with all fields
         task_intent = TaskIntent(
             target=intent.get("target"),
-            keywords=intent.get("keywords")
+            keywords=intent.get("keywords"),
+            schema_fields=intent.get("schema_fields"),
+            constraints=intent.get("constraints"),
+            output_shape=intent.get("output_shape"),
+            confidence=intent.get("confidence"),
+            normalized_hash=normalized_hash,
+            source_type=intent.get("source_type"),
+            target_attribute=intent.get("target_attribute")
         )
         db.add(task_intent)
         db.flush()  # Get the ID

@@ -1140,9 +1140,10 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         started = datetime.fromisoformat(started_iso)
         completed = datetime.fromisoformat(completed_iso)
 
-        # Persist sources
+        # Persist sources (including html_content for normalized schema)
         try:
             db_utils.update_task_sources(db, task_id, page_content=inner_text[:200000],
+                                         html_content=html_content[:200000] if html_content else None,
                                          network_requests=network, intent=intent, started_at=started)
         except Exception as e:
             logger.warning(f"Failed to persist sources: {e}")

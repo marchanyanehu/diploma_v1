@@ -6,7 +6,7 @@ from typing import Optional, Iterable, List, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from .db_models import User, ScrapingTask, ParserCache, ScheduledJob
+from .db_models import User, ScrapingTask, ParserCache, ScheduledJob, Domain
 from .models import TaskStatus
 
 
@@ -65,10 +65,12 @@ class ParserRepository:
         confidence_threshold: int = 70,
         limit: int = 3,
     ) -> List[ParserCache]:
+        # Use domain join for normalized schema
         q = (
             self.db.query(ParserCache)
+            .join(Domain, ParserCache.domain_id == Domain.id)
             .filter(
-                ParserCache.domain == domain,
+                Domain.name == domain,
                 ParserCache.confidence_score >= confidence_threshold,
                 ParserCache.is_active == True,  # noqa: E712
             )
