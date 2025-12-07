@@ -5,7 +5,7 @@ This module initializes the FastAPI application and defines the core API endpoin
 for processing web scraping requests using natural language prompts.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -14,6 +14,14 @@ import uvicorn
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, cast, List
 import logging
+
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Input sanitization
+from shared.input_sanitization import sanitize_user_input, InputSanitizationError
 
 # Import database components
 from .database import get_db, create_tables
@@ -52,6 +60,39 @@ except Exception:  # noqa: BLE001
 
 # Configure logging centrally
 logger = setup_logging(settings.log_level, settings.api_log_file)
+
+# Initialize rate limiter
+# Uses Redis if available (via REDIS_URL), falls back to in-memory storage
+def _get_rate_limit_storage_uri() -> str | None:
+    """Determine storage URI for rate limiter.
+    
+    Returns Redis URL if available, otherwise None (in-memory storage).
+    In test/dev environments without Redis, uses in-memory storage.
+    """
+    import os
+    # Skip Redis in test environment
+    if os.getenv("TESTING", "").lower() in ("1", "true", "yes"):
+        return "memory://"
+    
+    redis_url = getattr(settings, 'redis_url', None)
+    if redis_url and redis_url != "redis://localhost:6379/0":
+        return redis_url
+    
+    # Try to ping Redis before using it
+    try:
+        import redis
+        r = redis.from_url(redis_url or "redis://localhost:6379/0", socket_timeout=1)
+        r.ping()
+        return redis_url
+    except Exception:
+        logger.info("Redis unavailable for rate limiting, using in-memory storage")
+        return "memory://"
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["100/minute"],  # Global default
+    storage_uri=_get_rate_limit_storage_uri(),
+)
 
 # Initialize FastAPI app
 tags_metadata = [
@@ -129,6 +170,10 @@ app.add_middleware(
 )
 
 register_error_handlers(app)
+
+# Register rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 def get_task_service(db: Session = Depends(get_db)) -> TaskService:
     """Provide TaskService with injected dependencies (DIP)."""
@@ -225,7 +270,9 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
 # --- Auth Endpoints ---
 
 @app.post("/auth/register", response_model=UserResponse, tags=["Auth"])
+@limiter.limit("5/minute")  # Limit registration attempts
 def register(
+    request: Request,
     user: UserCreate,
     user_repo: UserRepository = Depends(get_user_repo),
     auth_service: auth.AuthService = Depends(auth.get_auth_service),
@@ -240,7 +287,9 @@ def register(
     return user_repo.create(username=user.username, password_hash=hashed_password, email=user.email)
 
 @app.post("/auth/token", response_model=Token, tags=["Auth"])
+@limiter.limit("10/minute")  # Limit login attempts to prevent brute force
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     user_repo: UserRepository = Depends(get_user_repo),
     auth_service: auth.AuthService = Depends(auth.get_auth_service),
@@ -324,10 +373,13 @@ def delete_job(
             },
         },
         401: {"description": "Not authenticated"},
+        429: {"description": "Rate limit exceeded"},
     },
 )
+@limiter.limit("10/minute")  # Limit scraping requests to prevent abuse
 async def process_request(
-    request: ScrapeRequest,
+    request: Request,
+    scrape_request: ScrapeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
     task_service: TaskService = Depends(get_task_service),
@@ -338,11 +390,24 @@ async def process_request(
     Note: Actual async processing is added in Task #203. For now, we persist
     a PENDING task and return its identifier so clients can poll status later.
     """
+    # Sanitize user input to prevent prompt injection
+    try:
+        sanitized_prompt = sanitize_user_input(scrape_request.prompt)
+    except InputSanitizationError as e:
+        logger.warning(
+            "api.process_request.blocked_injection",
+            extra={"user": current_user.username, "reason": str(e)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid prompt: {e}",
+        )
+    
     logger.info(
         "api.process_request.received",
-        extra={"url": str(request.url), "user": current_user.username},
+        extra={"url": str(scrape_request.url), "user": current_user.username},
     )
-    task_id = task_service.create_task(str(request.url), request.prompt, current_user.id)
+    task_id = task_service.create_task(str(scrape_request.url), sanitized_prompt, current_user.id)
     resp = TaskResponse(
         task_id=task_id,
         status=TaskStatus.PENDING,

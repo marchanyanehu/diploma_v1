@@ -2,6 +2,13 @@
 
 A microservice-based web scraping system powered by LLMs to intelligently extract structured data from websites using natural language queries.
 
+## Documentation
+
+-   📐 [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
+-   🤖 [AI Prompts](docs/AI_PROMPTS.md) - Prompt engineering documentation
+-   ⚠️ [System Limitations](docs/SYSTEM_LIMITATIONS.md) - What the system cannot do
+-   💬 [Example Dialogs](docs/EXAMPLE_DIALOGS.md) - 15+ usage examples and test scenarios
+
 ## Architecture
 
 Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
@@ -29,6 +36,18 @@ Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
 -   **Robust Fetching**: Playwright worker with retry/backoff knobs.
 -   **Microservices**: Scalable and decoupled architecture.
 -   **JWT Auth**: All task and schedule endpoints require Bearer tokens.
+-   **Rate Limiting**: API endpoints are rate-limited to prevent abuse.
+-   **Prompt Injection Protection**: User inputs are sanitized against malicious patterns.
+
+## Security Features
+
+-   **API Keys**: Stored in environment variables, never in code
+-   **Rate Limiting**: 
+    -   `/api/v1/process`: 10 requests/minute
+    -   `/auth/register`: 5 requests/minute  
+    -   `/auth/token`: 10 requests/minute
+-   **Input Sanitization**: Dangerous prompt patterns are blocked (instruction override, jailbreak attempts)
+-   **JWT Authentication**: All protected endpoints require valid Bearer tokens
 
 ## Setup & Installation
 
