@@ -51,10 +51,13 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
       DEBUG: ${DEBUG:-true}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      LLM_PROVIDER: ${LLM_PROVIDER:-baseten}
+      LLM_MODEL: ${LLM_MODEL:-baseten/deepseek-ai/DeepSeek-V3.2}
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-gemini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gemini-2.0-flash}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      BASETEN_API_KEY: ${BASETEN_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       postgres:
@@ -116,11 +119,14 @@ services:
       DB_NAME: ${DB_NAME:-diploma_db}
       DB_USER: ${DB_USER:-app_write}
       DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      LLM_PROVIDER: ${LLM_PROVIDER:-baseten}
+      LLM_MODEL: ${LLM_MODEL:-baseten/deepseek-ai/DeepSeek-V3.2}
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-gemini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gemini-2.0-flash}
       LLM_REQUEST_TIMEOUT_S: ${LLM_REQUEST_TIMEOUT_S:-60}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      BASETEN_API_KEY: ${BASETEN_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       postgres:

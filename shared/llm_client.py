@@ -1,14 +1,18 @@
 """
-LLM Client abstraction powered by LiteLLM, configured for Google Gemini (AI Studio).
+LLM Client abstraction powered by LiteLLM, configured for Baseten DeepSeek with
+Gemini fallback.
 
 This client provides a small, provider-agnostic interface for chat/completion
 with built-in retries and timeouts, and reads configuration from environment
 variables or the API settings module when available.
 
 Environment variables:
-  - LLM_PROVIDER (default: "gemini"): currently only "gemini" is supported here
-  - LLM_MODEL (default: "gemini-2.0-flash"): Gemini model name (e.g., gemini-2.5-flash)
-  - GOOGLE_API_KEY or GEMINI_API_KEY: API key for Google AI Studio
+  - LLM_PROVIDER (default: "baseten")
+  - LLM_MODEL (default: "baseten/deepseek-ai/DeepSeek-V3.2")
+  - LLM_FALLBACK_PROVIDER (default: "gemini")
+  - LLM_FALLBACK_MODEL (default: "gemini-2.0-flash")
+  - BASETEN_API_KEY: API key for Baseten-hosted DeepSeek
+  - GOOGLE_API_KEY or GEMINI_API_KEY: API key for Google AI Studio (fallback)
   - LLM_REQUEST_TIMEOUT_S (default: 30)
   - LLM_MAX_RETRIES (default: 2)
 
@@ -19,7 +23,8 @@ Usage:
 
 Notes:
   - LiteLLM expects model names in the form "gemini/<model>" (e.g., gemini/gemini-2.0-flash)
-  - If you pass LLM_MODEL without the "gemini/" prefix, it will be added automatically.
+  - LiteLLM expects Baseten model names prefixed with "baseten/" (e.g., baseten/deepseek-ai/DeepSeek-V3.2)
+  - If you pass LLM_MODEL without the provider prefix, it will be added automatically.
 """
 
 from __future__ import annotations
@@ -41,6 +46,9 @@ else:  # Fallback shim so import doesn't explode in test envs without litellm
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_PROVIDER = "baseten"
+DEFAULT_MODEL = "baseten/deepseek-ai/DeepSeek-V3.2"
+DEFAULT_FALLBACK_PROVIDER = "gemini"
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 
 
@@ -51,16 +59,21 @@ def _resolve_model_name(provider: str, model: str) -> str:
     If the input is "gemini-2.5-flash", we prefix with "gemini/".
     If already prefixed (starts with "gemini/"), we return as-is.
     """
-    if provider.lower() == "gemini":
+    provider_lower = provider.lower()
+    if provider_lower == "gemini":
         return model if model.startswith("gemini/") else f"gemini/{model}"
+    if provider_lower == "baseten":
+        return model if model.startswith("baseten/") else f"baseten/{model}"
     # Future providers could be normalized here
     return model
 
 
 @dataclass
 class LLMClientConfig:
-    provider: str = "gemini"
-    model: str = DEFAULT_GEMINI_MODEL
+    provider: str = DEFAULT_PROVIDER
+    model: str = DEFAULT_MODEL
+    fallback_provider: str = DEFAULT_FALLBACK_PROVIDER
+    fallback_model: str = DEFAULT_GEMINI_MODEL
     timeout_s: int = 30
     max_retries: int = 2
     temperature: float = 0.2
@@ -72,24 +85,65 @@ class LLMClient:
     def __init__(self, config: LLMClientConfig):
         self.config = config
         self.model_name = _resolve_model_name(config.provider, config.model)
-        # Ensure API key is present for Gemini
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.warning("No GOOGLE_API_KEY/GEMINI_API_KEY found; LLM calls will fail at runtime.")
+        self.fallback_model_name = (
+            _resolve_model_name(config.fallback_provider, config.fallback_model)
+            if config.fallback_model
+            else None
+        )
+        self.has_fallback = bool(self.fallback_model_name)
+
+        def _warn_missing_key(provider: str, label: str) -> None:
+            provider_lower = provider.lower()
+            if provider_lower == "gemini":
+                api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+                if not api_key:
+                    logger.warning(
+                        "No GOOGLE_API_KEY/GEMINI_API_KEY found; %s LLM calls will fail at runtime.",
+                        label,
+                    )
+            elif provider_lower == "baseten":
+                api_key = os.getenv("BASETEN_API_KEY")
+                if not api_key:
+                    logger.warning(
+                        "No BASETEN_API_KEY found; %s LLM calls will fail at runtime.",
+                        label,
+                    )
+
+        _warn_missing_key(config.provider, "primary")
+        if self.has_fallback:
+            _warn_missing_key(config.fallback_provider, "fallback")
 
     @classmethod
     def from_env(cls) -> "LLMClient":
         # Try to read from API settings if available
-        provider = os.getenv("LLM_PROVIDER", "gemini")
+        provider = os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER)
         model = os.getenv("LLM_MODEL")
         if not model:
             try:
                 # Lazy import to avoid cyclic deps in tests
                 from services.api.config import settings  # type: ignore
 
-                model = getattr(settings, "llm_model", DEFAULT_GEMINI_MODEL)
+                model = getattr(settings, "llm_model", DEFAULT_MODEL)
             except Exception:
-                model = DEFAULT_GEMINI_MODEL
+                model = DEFAULT_MODEL
+
+        fallback_provider = os.getenv("LLM_FALLBACK_PROVIDER")
+        if not fallback_provider:
+            try:
+                from services.api.config import settings  # type: ignore
+
+                fallback_provider = getattr(settings, "llm_fallback_provider", DEFAULT_FALLBACK_PROVIDER)
+            except Exception:
+                fallback_provider = DEFAULT_FALLBACK_PROVIDER
+
+        fallback_model = os.getenv("LLM_FALLBACK_MODEL")
+        if not fallback_model:
+            try:
+                from services.api.config import settings  # type: ignore
+
+                fallback_model = getattr(settings, "llm_fallback_model", DEFAULT_GEMINI_MODEL)
+            except Exception:
+                fallback_model = DEFAULT_GEMINI_MODEL
 
         timeout_s = int(os.getenv("LLM_REQUEST_TIMEOUT_S", "30"))
         max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
@@ -101,6 +155,8 @@ class LLMClient:
         cfg = LLMClientConfig(
             provider=provider,
             model=model,
+            fallback_provider=fallback_provider,
+            fallback_model=fallback_model,
             timeout_s=timeout_s,
             max_retries=max_retries,
             temperature=temperature,
@@ -161,41 +217,62 @@ class LLMClient:
         if extra_params:
             params.update(extra_params)
 
-        last_exc: Exception | None = None
-        for attempt in range(retry_count + 1):
+        def _run_with_retries(model_name: str, label: str) -> str:
+            last_exc: Exception | None = None
+            for attempt in range(retry_count + 1):
+                try:
+                    if self.config.log_payloads:
+                        try:
+                            logger.debug("LLM request payload (%s): %s", label, messages)
+                        except Exception:
+                            logger.debug("LLM request payload logging skipped (unserializable)")
+                    resp = completion(
+                        model=model_name,
+                        messages=messages,
+                        stream=False,  # ensure non-streaming response
+                        **params,
+                    )
+                    text = self._extract_text_from_response(resp)
+                    if self.config.log_payloads:
+                        try:
+                            logger.debug("LLM response text (%s): %s", label, text)
+                        except Exception:
+                            logger.debug("LLM response logging skipped (unserializable)")
+                    return text
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt >= retry_count:
+                        break
+                    backoff = 0.5 * (attempt + 1)
+                    logger.info(
+                        "%s LLM retry %s/%s due to %s; backing off %.1fs",
+                        label,
+                        attempt + 1,
+                        retry_count,
+                        exc,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+            raise RuntimeError(f"{label} LLM request failed after {retry_count + 1} attempts: {last_exc}")
+
+        try:
+            return _run_with_retries(self.model_name, "primary")
+        except Exception as primary_exc:
+            if not self.has_fallback or not self.fallback_model_name:
+                raise
+            logger.info(
+                "Primary LLM (%s) failed with %s; attempting fallback model %s",
+                self.model_name,
+                primary_exc,
+                self.fallback_model_name,
+            )
             try:
-                if self.config.log_payloads:
-                    try:
-                        logger.debug("LLM request payload: %s", messages)
-                    except Exception:
-                        logger.debug("LLM request payload logging skipped (unserializable)")
-                resp = completion(
-                    model=self.model_name,
-                    messages=messages,
-                    stream=False,  # ensure non-streaming response
-                    **params,
+                return _run_with_retries(self.fallback_model_name, "fallback")
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    "Primary and fallback LLM requests failed. "
+                    f"Primary error: {primary_exc}; Fallback error: {fallback_exc}"
                 )
-                text = self._extract_text_from_response(resp)
-                if self.config.log_payloads:
-                    try:
-                        logger.debug("LLM response text: %s", text)
-                    except Exception:
-                        logger.debug("LLM response logging skipped (unserializable)")
-                return text
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                if attempt >= retry_count:
-                    break
-                backoff = 0.5 * (attempt + 1)
-                logger.info(
-                    "LLM retry %s/%s due to %s; backing off %.1fs",
-                    attempt + 1,
-                    retry_count,
-                    exc,
-                    backoff,
-                )
-                time.sleep(backoff)
-        raise RuntimeError(f"LLM request failed after {retry_count + 1} attempts: {last_exc}")
 
     def generate_text(
         self,

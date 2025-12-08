@@ -347,22 +347,22 @@ if response.startswith("```"):
 
 | Provider | Model | Use Case |
 |----------|-------|----------|
-| **Google Gemini** | gemini-2.0-flash | Primary (intent extraction, regex generation) |
-| **OpenAI** | gpt-4o-mini | Fallback provider |
+| **Baseten (DeepSeek)** | baseten/deepseek-ai/DeepSeek-V3.2 | Primary (intent extraction, regex generation) |
+| **Google Gemini** | gemini-2.0-flash | Fallback provider |
 
-### Why Gemini Flash?
+### Why DeepSeek V3.2 via Baseten?
 
-1. **Cost Efficiency**: Lower cost per token than GPT-4
-2. **Speed**: Flash models optimized for low latency
-3. **JSON Mode**: Reliable structured output
-4. **Context Window**: 1M tokens handles large HTML snippets
+1. **Reasoning Quality**: Strong structured reasoning for extraction tasks
+2. **Speed/Cost**: Competitive latency and pricing on Baseten hosting
+3. **JSON Reliability**: Good adherence to constrained JSON outputs
+4. **Context Window**: Large context for HTML-heavy prompts
 
 ### Why LiteLLM Abstraction?
 
 ```python
 # Easy provider switching via environment variable
-GEMINI_API_KEY=xxx  # Uses Gemini
-OPENAI_API_KEY=xxx  # Falls back to OpenAI
+BASETEN_API_KEY=xxx           # Uses DeepSeek on Baseten
+GOOGLE_API_KEY=xxx            # Falls back to Gemini
 ```
 
 Benefits:

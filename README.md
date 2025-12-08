@@ -75,8 +75,8 @@ Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
 1.  **Prerequisites**: Docker and Docker Compose.
 2.  **Environment Variables**:
     -   Copy `.env.example` to `.env`.
-    -   Set your LLM keys (`GOOGLE_API_KEY` or `GEMINI_API_KEY`, or `OPENAI_API_KEY`).
-    -   Choose provider/model via `LLM_PROVIDER`/`LLM_MODEL` (default: gemini / gemini-2.0-flash).
+    -   Set your LLM keys (`BASETEN_API_KEY` for DeepSeek via Baseten; fallback `GOOGLE_API_KEY`/`GEMINI_API_KEY` for Gemini; optional `OPENAI_API_KEY`).
+    -   Choose provider/model via `LLM_PROVIDER`/`LLM_MODEL` (default: baseten / baseten/deepseek-ai/DeepSeek-V3.2). Optional fallback via `LLM_FALLBACK_PROVIDER`/`LLM_FALLBACK_MODEL` (default: gemini / gemini-2.0-flash).
     -   Set `SECRET_KEY` for JWT auth.
     -   Use least-privilege DB creds: `DB_USER=app_write`, `DB_PASSWORD=<strong>`, keep `POSTGRES_USER` only for admin/bootstrap.
 3.  **Run**:

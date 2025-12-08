@@ -74,8 +74,10 @@ class Settings(BaseForSettings):  # type: ignore[misc]
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY")
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
-    llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")  # default to gemini for project focus
-    llm_model: str = Field(default="gemini-2.0-flash", alias="LLM_MODEL")
+    llm_provider: str = Field(default="baseten", alias="LLM_PROVIDER")  # default to Baseten DeepSeek
+    llm_model: str = Field(default="baseten/deepseek-ai/DeepSeek-V3.2", alias="LLM_MODEL")
+    llm_fallback_provider: str = Field(default="gemini", alias="LLM_FALLBACK_PROVIDER")
+    llm_fallback_model: str = Field(default="gemini-2.0-flash", alias="LLM_FALLBACK_MODEL")
     
     # Security
     secret_key: str = Field(default="your-secret-key-change-in-production", alias="SECRET_KEY")

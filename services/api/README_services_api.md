@@ -148,10 +148,13 @@ Key environment variables (root `.env` or process env):
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis/Celery broker + rate limit storage |
 | `CELERY_BROKER_URL` | `${REDIS_URL}` | Celery broker |
 | `CELERY_RESULT_BACKEND` | `${REDIS_URL}` | Celery backend |
-| `GOOGLE_API_KEY`/`GEMINI_API_KEY` | - | Gemini LLM key |
-| `OPENAI_API_KEY` | - | OpenAI LLM key |
-| `LLM_PROVIDER` | `gemini` | LLM provider |
-| `LLM_MODEL` | `gemini-2.0-flash` | Model name |
+| `BASETEN_API_KEY` | - | Baseten (DeepSeek) LLM key |
+| `GOOGLE_API_KEY`/`GEMINI_API_KEY` | - | Gemini fallback LLM key |
+| `OPENAI_API_KEY` | - | OpenAI LLM key (optional) |
+| `LLM_PROVIDER` | `baseten` | Primary LLM provider |
+| `LLM_MODEL` | `baseten/deepseek-ai/DeepSeek-V3.2` | Primary model name |
+| `LLM_FALLBACK_PROVIDER` | `gemini` | Fallback provider |
+| `LLM_FALLBACK_MODEL` | `gemini-2.0-flash` | Fallback model name |
 | `LLM_REQUEST_TIMEOUT_S` | `60` | LLM request timeout |
 | `SECRET_KEY` | - | JWT signing key |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
