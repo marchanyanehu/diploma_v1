@@ -181,7 +181,12 @@ The system **never sends full HTML to the LLM**. Instead, it extracts focused sn
 | `micro_snippet` | 150 chars | Focused HTML context for precise regex generation |
 | `best_snippet` | 4000 chars | Larger context as fallback |
 
-This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page.
+Execution model (current):
+- LLM is used to propose examples and generate regex.
+- **Only regex matches are returned**. If regex generation or matching fails, the field is marked unavailable (no LLM fallback).
+- Schema extraction also returns regex-only results (LLM output is used only to seed regex generation).
+
+This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page; regex runs locally on the full captured content.
 
 ### System Prompt
 
@@ -258,6 +263,7 @@ Before accepting a generated regex, `validate_regex()` enforces:
 | Example coverage | 100% of examples | Must match ALL provided examples |
 | Duplicate ratio | < 80% duplicates | Reject overly broad patterns |
 | Average match length | 2-2000 chars | Filter garbage matches |
+| Broadness headroom | up to max(len(examples)*200, 2000) | Allow large list pages without over-pruning |
 
 ### Output Schema
 
@@ -281,8 +287,7 @@ Before accepting a generated regex, `validate_regex()` enforces:
 | Optional elements | Non-capturing groups with `?` |
 
 ### Integration
-
-Used by `shared/regex_generation.py` in `generate_regex_for_target()`. Results are cached in `ParserCache` table for reuse on the same domain/keywords.
+Used by `shared/regex_generation.py` in `generate_regex_for_target()`. Results are cached in `ParserCache` table for reuse on the same domain/keywords. Extraction outputs come **only** from regex matches; if no regex matches, the field is omitted.
 
 ---
 
