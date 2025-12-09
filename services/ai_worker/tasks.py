@@ -950,79 +950,79 @@ Return ONLY the JSON, no other text."""
     if "image_url" in schema_fields and not field_examples.get("image_url") and image_urls_from_page:
         field_examples["image_url"].extend(image_urls_from_page[:5])
         
-        # Generate and cache regex patterns for future use AND use regex results as output
-        field_regexes = {}
-        if len(records) >= 1:
-            _log_event(task_id, "schema_generating_regex", field_count=len(schema_fields))
-            for field, examples in field_examples.items():
-                if examples:
-                    regex_result = _generate_field_regex(field, examples, html_content, llm)
-                    if regex_result and regex_result.get("regex"):
-                        field_regexes[field] = regex_result
-                        _log_event(task_id, "schema_field_regex_generated", field=field)
+    # Generate and cache regex patterns for future use AND use regex results as output
+    field_regexes = {}
+    if len(records) >= 1:
+        _log_event(task_id, "schema_generating_regex", field_count=len(schema_fields))
+        for field, examples in field_examples.items():
+            if examples:
+                regex_result = _generate_field_regex(field, examples, html_content, llm)
+                if regex_result and regex_result.get("regex"):
+                    field_regexes[field] = regex_result
+                    _log_event(task_id, "schema_field_regex_generated", field=field)
 
-        if not field_regexes:
-            _log_event(task_id, "schema_extraction_failed", error="regex_generation_failed")
-            return [], False
+    if not field_regexes:
+        _log_event(task_id, "schema_extraction_failed", error="regex_generation_failed")
+        return [], False
 
-        # Apply generated regexes to produce final extraction (regex-only)
-        field_matches: Dict[str, List[str]] = {}
-        for field, regex_info in field_regexes.items():
-            pattern = regex_info.get("regex", "")
-            flags = regex_info.get("flags", "s")
-            if pattern:
-                matches = _apply_regex_matches(pattern, flags, html_content)
-                if matches:
-                    cleaned = []
-                    for m in matches:
-                        clean = _strip_html_to_text(m) if _looks_like_html(m) else m
-                        if clean:
-                            cleaned.append(clean)
-                    if cleaned:
-                        field_matches[field] = cleaned
+    # Apply generated regexes to produce final extraction (regex-only)
+    field_matches: Dict[str, List[str]] = {}
+    for field, regex_info in field_regexes.items():
+        pattern = regex_info.get("regex", "")
+        flags = regex_info.get("flags", "s")
+        if pattern:
+            matches = _apply_regex_matches(pattern, flags, html_content)
+            if matches:
+                cleaned = []
+                for m in matches:
+                    clean = _strip_html_to_text(m) if _looks_like_html(m) else m
+                    if clean:
+                        cleaned.append(clean)
+                if cleaned:
+                    field_matches[field] = cleaned
 
-        if not field_matches:
-            _log_event(task_id, "schema_extraction_failed", error="regex_no_matches")
-            return [], False
+    if not field_matches:
+        _log_event(task_id, "schema_extraction_failed", error="regex_no_matches")
+        return [], False
 
-        max_len = max(len(v) for v in field_matches.values())
-        extracted_via_regex: List[Dict[str, Any]] = []
-        for i in range(max_len):
-            record = {}
-            for field, values in field_matches.items():
-                if i < len(values):
-                    record[field] = values[i]
-            if record:
-                text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
-                extracted_via_regex.append(
-                    {"text": text_repr, "fields": record, "source": "schema_regex", "confidence": 0.9}
-                )
-
-        if not extracted_via_regex:
-            _log_event(task_id, "schema_extraction_failed", error="regex_combination_empty")
-            return [], False
-
-        # Cache the combined regexes
-        combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
-        try:
-            db_utils.record_new_parser(
-                db,
-                task_id=task_id,
-                url=url,
-                intent={"keywords": schema_fields, "schema_fields": schema_fields},
-                pattern=f"(?s:SCHEMA:{combined_pattern})",
-                flags="s",
-                matches_count=len(extracted_via_regex),
-                source_type="SCHEMA",
-                sample_input=html_content[:2000],
-                sample_output=[{"text": d["text"]} for d in extracted_via_regex[:5]],
+    max_len = max(len(v) for v in field_matches.values())
+    extracted_via_regex: List[Dict[str, Any]] = []
+    for i in range(max_len):
+        record = {}
+        for field, values in field_matches.items():
+            if i < len(values):
+                record[field] = values[i]
+        if record:
+            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
+            extracted_via_regex.append(
+                {"text": text_repr, "fields": record, "source": "schema_regex", "confidence": 0.9}
             )
-            _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
-        except Exception as e:
-            logger.warning(f"Failed to cache schema regex: {e}")
 
-        _log_event(task_id, "schema_extraction_success", record_count=len(extracted_via_regex))
-        return extracted_via_regex, False  # Not from cache - newly extracted
+    if not extracted_via_regex:
+        _log_event(task_id, "schema_extraction_failed", error="regex_combination_empty")
+        return [], False
+
+    # Cache the combined regexes
+    combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
+    try:
+        db_utils.record_new_parser(
+            db,
+            task_id=task_id,
+            url=url,
+            intent={"keywords": schema_fields, "schema_fields": schema_fields},
+            pattern=f"(?s:SCHEMA:{combined_pattern})",
+            flags="s",
+            matches_count=len(extracted_via_regex),
+            source_type="SCHEMA",
+            sample_input=html_content[:2000],
+            sample_output=[{"text": d["text"]} for d in extracted_via_regex[:5]],
+        )
+        _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
+    except Exception as e:
+        logger.warning(f"Failed to cache schema regex: {e}")
+
+    _log_event(task_id, "schema_extraction_success", record_count=len(extracted_via_regex))
+    return extracted_via_regex, False  # Not from cache - newly extracted
 
 def _run_schema_extraction(
     task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
