@@ -748,68 +748,11 @@ def _run_schema_extraction_with_cache(
             
             # Check if this is a SCHEMA-type parser (stores field regexes as JSON)
             if "SCHEMA:" in stored_regex:
-                _log_event(task_id, "schema_cache_found", parser_id=parser.id)
-                
-                # Extract the JSON schema data
-                schema_match = re.search(r'SCHEMA:(\{.*\})', stored_regex)
-                if not schema_match:
-                    continue
-                
-                try:
-                    schema_data = _json.loads(schema_match.group(1))
-                    field_regexes = schema_data.get("field_regexes", {})
-                except _json.JSONDecodeError:
-                    continue
-                
-                if not field_regexes:
-                    continue
-                
-                # Apply each field's regex to extract values
-                field_matches = {}
-                for field, regex_info in field_regexes.items():
-                    pattern = regex_info.get("regex", "")
-                    flags = regex_info.get("flags", "s")
-                    if pattern:
-                        matches = _apply_regex_matches(pattern, flags, html_content)
-                        if matches:
-                            # Clean HTML from matches
-                            cleaned = []
-                            for m in matches:
-                                clean = _strip_html_to_text(m) if _looks_like_html(m) else m
-                                if clean:
-                                    cleaned.append(clean)
-                            if cleaned:
-                                field_matches[field] = cleaned
-                                _log_event(task_id, "schema_field_cache_hit", field=field, count=len(cleaned))
-                
-                # Combine field matches into records
-                if field_matches:
-                    max_len = max(len(v) for v in field_matches.values())
-                    extracted_data = []
-                    
-                    for i in range(max_len):
-                        record = {}
-                        for field, values in field_matches.items():
-                            if i < len(values):
-                                record[field] = values[i]
-                        
-                        if record:
-                            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
-                            extracted_data.append({
-                                "text": text_repr,
-                                "fields": record,
-                                "source": "cached_schema_regex",
-                                "confidence": 0.95
-                            })
-                    
-                    if extracted_data:
-                        _log_event(task_id, "schema_cache_hit", parser_id=parser.id, record_count=len(extracted_data))
-                        # Update parser usage stats
-                        try:
-                            db_utils.update_parser_usage(db, parser.id)
-                        except Exception as e:
-                            _log_event(task_id, "update_parser_usage_failed", error=str(e))
-                        return extracted_data, True  # Cache was used
+                _log_event(task_id, "schema_cache_found_but_skipping", parser_id=parser.id,
+                           reason="per-field regex caching cannot maintain field associations")
+                # Skip cached schema regex - it combines fields positionally which breaks associations
+                # Fall through to LLM extraction for accurate results
+                continue
             
         except Exception as e:
             logger.warning(f"Failed to apply cached schema parser: {e}")
@@ -897,7 +840,7 @@ Return ONLY the JSON, no other text."""
 
     _log_event(task_id, "schema_records_found", count=len(records))
 
-    # Build result records
+    # Build result records from LLM extraction (properly associated fields)
     extracted_data = []
     field_examples = {field: [] for field in schema_fields}
 
@@ -937,15 +880,37 @@ Return ONLY the JSON, no other text."""
         # Do not positional-fill image_url; only use as regex examples
         if "image_url" in schema_fields and record.get("image_url"):
             field_examples["image_url"].append(str(record["image_url"]))
+        
+        # Build the extracted record from LLM data (fields are properly associated)
+        record_fields = {}
+        for field in schema_fields:
+            if field in record and record[field]:
+                record_fields[field] = str(record[field])
+        
+        if record_fields:
+            text_repr = " | ".join(f"{k}: {v}" for k, v in record_fields.items() if v)
+            extracted_data.append({
+                "text": text_repr,
+                "fields": record_fields,
+                "source": "schema_llm",
+                "confidence": 0.95
+            })
 
     # If image_url examples were missing in records, seed examples from page-level images for regex generation
     if "image_url" in schema_fields and not field_examples.get("image_url") and image_urls_from_page:
         field_examples["image_url"].extend(image_urls_from_page[:5])
+    
+    # Return LLM-extracted data if we have results
+    if not extracted_data:
+        _log_event(task_id, "schema_extraction_failed", error="no_records_from_llm")
+        return [], False
+    
+    _log_event(task_id, "schema_llm_extraction_complete", count=len(extracted_data))
         
-    # Generate and cache regex patterns for future use AND use regex results as output
+    # Generate regex patterns for caching (for future requests)
     field_regexes = {}
     if len(records) >= 1:
-        _log_event(task_id, "schema_generating_regex", field_count=len(schema_fields))
+        _log_event(task_id, "schema_generating_regex_for_cache", field_count=len(schema_fields))
         for field, examples in field_examples.items():
             if examples:
                 regex_result = _generate_field_regex(field, examples, html_content, llm)
@@ -953,68 +918,28 @@ Return ONLY the JSON, no other text."""
                     field_regexes[field] = regex_result
                     _log_event(task_id, "schema_field_regex_generated", field=field)
 
-    if not field_regexes:
-        _log_event(task_id, "schema_extraction_failed", error="regex_generation_failed")
-        return [], False
-
-    # Apply generated regexes to produce final extraction (regex-only)
-    field_matches: Dict[str, List[str]] = {}
-    for field, regex_info in field_regexes.items():
-        pattern = regex_info.get("regex", "")
-        flags = regex_info.get("flags", "s")
-        if pattern:
-            matches = _apply_regex_matches(pattern, flags, html_content)
-            if matches:
-                cleaned = []
-                for m in matches:
-                    clean = _strip_html_to_text(m) if _looks_like_html(m) else m
-                    if clean:
-                        cleaned.append(clean)
-                if cleaned:
-                    field_matches[field] = cleaned
-
-    if not field_matches:
-        _log_event(task_id, "schema_extraction_failed", error="regex_no_matches")
-        return [], False
-
-    max_len = max(len(v) for v in field_matches.values())
-    extracted_via_regex: List[Dict[str, Any]] = []
-    for i in range(max_len):
-        record = {}
-        for field, values in field_matches.items():
-            if i < len(values):
-                record[field] = values[i]
-        if record:
-            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
-            extracted_via_regex.append(
-                {"text": text_repr, "fields": record, "source": "schema_regex", "confidence": 0.9}
+    # Cache the combined regexes for future use (even if not all fields matched)
+    if field_regexes:
+        combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
+        try:
+            db_utils.record_new_parser(
+                db,
+                task_id=task_id,
+                url=url,
+                intent={"keywords": schema_fields, "schema_fields": schema_fields},
+                pattern=f"(?s:SCHEMA:{combined_pattern})",
+                flags="s",
+                matches_count=len(extracted_data),
+                source_type="SCHEMA",
+                sample_input=html_content[:2000],
+                sample_output=[{"text": d["text"]} for d in extracted_data[:5]],
             )
+            _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
+        except Exception as e:
+            logger.warning(f"Failed to cache schema regex: {e}")
 
-    if not extracted_via_regex:
-        _log_event(task_id, "schema_extraction_failed", error="regex_combination_empty")
-        return [], False
-
-    # Cache the combined regexes
-    combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
-    try:
-        db_utils.record_new_parser(
-            db,
-            task_id=task_id,
-            url=url,
-            intent={"keywords": schema_fields, "schema_fields": schema_fields},
-            pattern=f"(?s:SCHEMA:{combined_pattern})",
-            flags="s",
-            matches_count=len(extracted_via_regex),
-            source_type="SCHEMA",
-            sample_input=html_content[:2000],
-            sample_output=[{"text": d["text"]} for d in extracted_via_regex[:5]],
-        )
-        _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
-    except Exception as e:
-        logger.warning(f"Failed to cache schema regex: {e}")
-
-    _log_event(task_id, "schema_extraction_success", record_count=len(extracted_via_regex))
-    return extracted_via_regex, False  # Not from cache - newly extracted
+    _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
+    return extracted_data, False  # Not from cache - newly extracted via LLM
 
 def _run_schema_extraction(
     task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
