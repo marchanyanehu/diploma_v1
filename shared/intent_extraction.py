@@ -34,30 +34,11 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .llm_client import LLMClient
+from shared.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
-_INTENT_SYSTEM_PROMPT = (
-    "You are an intent extraction engine. Given a free-form user request about web data "
-    "scraping or extraction, you MUST output ONLY strict JSON matching the required schema. "
-    "Do not include any commentary, markdown fences, or explanations.\n\n"
-    "Rules:\n"
-    "1. Output ONLY valid JSON.\n"
-    "2. If a field is unknown or not present, use an empty list for arrays or an empty string for strings.\n"
-    "3. confidence is a float 0..1 (use 0.5 if uncertain).\n"
-    "4. keywords should be individual field names/phrases to extract. If user lists fields like 'job_title, country, city', split them into ['job_title', 'country', 'city'].\n"
-    "5. constraints are specific filters (e.g., geography, price range, date window).\n"
-    "6. output_shape is a concise description of the desired result form.\n"
-    "7. target should be a short noun phrase (e.g., 'job details', 'product info').\n"
-    "8. source_type should be 'text' or 'attribute'. Use 'attribute' if the user wants URLs, links, images, IDs.\n"
-    "9. target_attribute should be the attribute name (e.g., 'href', 'src', 'data-id') if source_type is 'attribute', otherwise null.\n"
-    "10. schema_fields: If user provides specific field names (like 'job_title, country, city'), extract them as a list. These are the exact field names for the output JSON."
-)
 
-_INTENT_USER_TEMPLATE = (
-    "USER_REQUEST:\n{user_input}\n\n"
-    "Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence, source_type, target_attribute, schema_fields"
-)
 
 _JSON_FALLBACK_TEMPLATE = {
     "target": "",
@@ -84,8 +65,8 @@ _DEFENSIVE_JSON_REGEX = re.compile(r"\{.*\}", re.DOTALL)
 
 def _build_messages(user_input: str) -> List[Dict[str, Any]]:
     return [
-        {"role": "system", "content": _INTENT_SYSTEM_PROMPT},
-        {"role": "user", "content": _INTENT_USER_TEMPLATE.format(user_input=user_input)},
+        {"role": "system", "content": INTENT_EXTRACTION_SYSTEM_PROMPT},
+        {"role": "user", "content": INTENT_EXTRACTION_USER_TEMPLATE.format(user_input=user_input)},
         {"role": "assistant", "content": _JSON_EXAMPLE},  # few-shot style clarification
         {"role": "user", "content": user_input},
     ]

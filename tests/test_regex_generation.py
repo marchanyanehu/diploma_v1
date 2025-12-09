@@ -19,10 +19,10 @@ class DummyLLM:
             # Over-broad: matches everything containing 'Job'
             return json.dumps(
                 {
-                    "regex": r"Job.+",  # greedy, likely too broad
+                    "regex": r"Other.+",  # matches wrong text
                     "flags": "i",
                     "extraction_mode": "findall",
-                    "explanation": "broad match",
+                    "explanation": "wrong match",
                     "confidence": 0.4,
                 }
             )

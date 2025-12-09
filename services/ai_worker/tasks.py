@@ -17,6 +17,19 @@ from shared.snippet_extractor import extract_snippet_around_example
 from shared import regex_generation
 from shared.llm_client import LLMClient
 from shared import metrics
+from shared.prompts import (
+    HTML_FIELD_REGEX_SYSTEM_PROMPT,
+    HTML_FIELD_REGEX_USER_TEMPLATE,
+    ATTRIBUTE_EXTRACTION_USER_TEMPLATE,
+    ATTRIBUTE_EXTRACTION_DIRECT_USER_TEMPLATE,
+    FILTER_VALUES_USER_TEMPLATE,
+    SELECT_BEST_CANDIDATE_USER_TEMPLATE,
+    FIND_MATCHING_TEXT_ATTRIBUTE_USER_TEMPLATE,
+    FIND_MATCHING_TEXT_CONTENT_USER_TEMPLATE,
+    FIND_STRUCTURED_EXAMPLES_USER_TEMPLATE,
+    SCHEMA_EXTRACTION_SYSTEM_PROMPT,
+    SCHEMA_EXTRACTION_USER_TEMPLATE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,18 +107,9 @@ def _filter_values_via_llm(values: List[str], target: str, llm: LLMClient) -> Li
 
     chunk = unique_values[:100]
     
-    prompt = (
-        f"I am extracting '{target}' from a webpage.\n"
-        f"I found the following candidate URLs/values.\n\n"
-        f"FILTER RULES:\n"
-        f"- Keep ONLY values that are specific '{target}' (e.g. individual job posting URLs)\n"
-        f"- REMOVE generic navigation links (e.g. '/careers/', '/jobs/', '/about/')\n"
-        f"- REMOVE image URLs, javascript links, CSS files\n"
-        f"- REMOVE social media share links\n"
-        f"- For job URLs: keep URLs with specific job IDs/slugs, remove generic listing pages\n\n"
-        f"CANDIDATES: {chunk}\n\n"
-        f"Return ONLY a JSON object: {{\"valid_values\": [\"val1\", \"val2\"]}}\n"
-        f"Return only the values that are specific '{target}', not navigation links."
+    prompt = FILTER_VALUES_USER_TEMPLATE.format(
+        target=target,
+        chunk=chunk
     )
     
     try:
@@ -190,13 +194,11 @@ def _extract_attribute_via_llm(html_content: str, text_examples: List[str], targ
     
     combined_snippets = "\n---\n".join(snippets[:3])[:15000]
     
-    prompt = (
-        f"I need to extract '{attribute}' attributes related to '{target}'.\n"
-        f"The text examples associated with these elements are: {text_examples[:5]}\n"
-        f"Find the values of the '{attribute}' attribute for elements matching these text descriptions.\n"
-        f"Return ONLY a JSON object: {{\"values\": [\"value1\", \"value2\"]}}\n"
-        f"If none found, return {{\"values\": []}}.\n\n"
-        f"HTML SNIPPETS:\n{combined_snippets}"
+    prompt = ATTRIBUTE_EXTRACTION_DIRECT_USER_TEMPLATE.format(
+        attribute=attribute,
+        target=target,
+        text_examples=text_examples[:5],
+        combined_snippets=combined_snippets
     )
     
     try:
@@ -303,12 +305,10 @@ def _select_best_candidate_via_llm(candidates: List[Dict], intent: Dict, llm: LL
     for i, c in enumerate(candidates):
         options.append(f"Option {i}: ...{c['snippet']}...")
     
-    prompt = (
-        f"TARGET: {intent.get('target')}\n"
-        f"KEYWORDS: {intent.get('keywords')}\n"
-        f"We found these content snippets containing the target data. Which one is the best source for regex extraction?\n"
-        f"CANDIDATES:\n" + "\n".join(options[:5]) + "\n\n"
-        "Return JSON: {'best_option_index': int, 'reason': str}"
+    prompt = SELECT_BEST_CANDIDATE_USER_TEMPLATE.format(
+        target=intent.get('target'),
+        keywords=intent.get('keywords'),
+        options="\n".join(options[:5])
     )
     
     try:
@@ -339,25 +339,14 @@ def _find_matching_text_via_llm(inner_text: str, target: str, llm: LLMClient, is
     if is_attribute_target:
         # For attribute targets (links, images, etc), we need to find the visible TEXT
         # that anchors the element (e.g. link text, alt text, caption)
-        prompt = (
-            f"I need to find '{target}' from this page, which are likely in HTML attributes.\n"
-            f"Identify 3-5 distinct visible TEXT labels that represent or anchor these items.\n"
-            f"For links, this is the clickable text. For images, this might be the caption or alt text.\n"
-            f"Return the EXACT text labels as they appear in the content.\n"
-            f"Do NOT return URLs/attributes - return the visible text.\n"
-            f"Return ONLY a JSON object: {{\"examples\": [\"Label 1\", \"Label 2\"]}}\n"
-            f"If none found, return {{\"examples\": []}}.\n\n"
-            f"CONTENT:\n{snippet}"
+        prompt = FIND_MATCHING_TEXT_ATTRIBUTE_USER_TEMPLATE.format(
+            target=target,
+            snippet=snippet
         )
     else:
-        prompt = (
-            f"I need to extract '{target}' from the text content below.\n"
-            f"Identify 3-5 distinct, concrete examples of text that represent '{target}'.\n"
-            f"Return the EXACT substrings as they appear in the content.\n"
-            f"These should be specific items, NOT generic phrases.\n"
-            f"Return ONLY a JSON object: {{\"examples\": [\"example1\", \"example2\"]}}\n"
-            f"If none found, return {{\"examples\": []}}.\n\n"
-            f"CONTENT:\n{snippet}"
+        prompt = FIND_MATCHING_TEXT_CONTENT_USER_TEMPLATE.format(
+            target=target,
+            snippet=snippet
         )
     
     try:
@@ -391,14 +380,9 @@ def _find_structured_examples_via_llm(text: str, target: str, keywords: List[str
     snippet = text[:32768]
     fields_str = ", ".join(keywords[:5])
     
-    prompt = (
-        f"I need to extract structured records containing: {fields_str}\n"
-        f"Find 2-3 COMPLETE example records from the text below.\n"
-        f"Each record should include ALL the fields mentioned above.\n"
-        f"Return the EXACT text as it appears, preserving line breaks within each record.\n\n"
-        f"Return ONLY a JSON object: {{\"examples\": [\"record1 text\", \"record2 text\"]}}\n"
-        f"If no complete records found, return {{\"examples\": []}}.\n\n"
-        f"CONTENT:\n{snippet}"
+    prompt = FIND_STRUCTURED_EXAMPLES_USER_TEMPLATE.format(
+        fields_str=fields_str,
+        snippet=snippet
     )
     
     try:
@@ -697,64 +681,18 @@ def _generate_field_regex(field_name: str, examples: List[str], html_content: st
     examples_text = chr(10).join(f'- "{ex}"' for ex in examples[:10])
     snippet_text = "\n---\n".join(snippets[:5])
     
-    prompt = f"""Generate a regex to extract ALL "{field_name}" values from HTML.
-
-EXAMPLE VALUES THAT MUST BE MATCHED (there are {len(examples)} total):
-{examples_text}
-
-HTML SNIPPETS WHERE THESE VALUES APPEAR:
-{snippet_text}
-
-## STRICT RULES - FOLLOW EXACTLY
-
-### Global Assumptions
-* DOTALL is enabled (`.` matches newlines). Do NOT add inline `(?s)`.
-* Always escape curly braces as `\\{{` and `\\}}`.
-
-### Output Format
-Output ONLY: {{"regex": "YOUR_PATTERN", "flags": "s"}}
-No explanations. No comments. No extra keys.
-
-### CRITICAL: Avoid Literal Text Anchors
-❌ NEVER include literal words/phrases from the page content in your regex.
-❌ NEVER use text like "Būklė", "Price:", "Posted:", category names, or any natural language text.
-❌ NEVER anchor on specific values that appear in the examples themselves.
-❌ NEVER use Unicode characters from the page content.
-
-### CRITICAL: Avoid Page-Specific Anchors  
-❌ Do NOT use full URLs, numeric IDs, GUIDs, timestamps, hashes.
-❌ Do NOT use overly generic class names like "title", "text", "content" alone - they match too many elements.
-❌ Do NOT bind to complete class lists; use only the most specific/stable fragment.
-
-### MUST: Use Structural Anchors Only
-✅ Anchor ONLY on stable class/id attribute fragments that are specific to the data type.
-✅ Look for class names that indicate the semantic meaning (e.g., "listing-title", "item-price", "post-date").
-✅ Use `[^>]*?` to allow attribute variability.
-✅ Use `[^<]+?` for text content, `[^"]+` for attribute values.
-
-### Pattern Templates
-Text in element: `class="specific-class[^"]*"[^>]*>\\s*([^<]+?)\\s*</`
-Attribute value: `class="specific-class[^"]*"[^>]*?href="([^"]+)"`
-
-### Failure Behavior
-If you cannot find a reliable structural anchor, output: {{"regex": "", "flags": "s"}}
-It is BETTER to return empty than to create a brittle regex.
-
-Your JSON response:"""
+    prompt = HTML_FIELD_REGEX_USER_TEMPLATE.format(
+        field_name=field_name,
+        example_count=len(examples),
+        examples_text=examples_text,
+        snippet_text=snippet_text
+    )
 
     try:
         messages = [
             {
                 "role": "system", 
-                "content": (
-                    "You are a regex expert. Your task is to generate STRUCTURAL regex patterns for HTML data extraction. "
-                    "CRITICAL RULES:\n"
-                    "1. NEVER use literal text from the page (words, phrases, labels) in your regex.\n"
-                    "2. ONLY anchor on HTML class/id attributes that are specific to the data structure.\n"
-                    "3. Use single capturing group for the target value.\n"
-                    "4. Output ONLY valid JSON: {\"regex\": \"...\", \"flags\": \"s\"}\n"
-                    "5. Return empty regex if no reliable structural pattern exists."
-                )
+                "content": HTML_FIELD_REGEX_SYSTEM_PROMPT
             },
             {"role": "user", "content": prompt}
         ]
@@ -826,34 +764,15 @@ def _run_schema_extraction_with_cache(
     
     # No cache hit - use LLM extraction
     fields_list = ", ".join(schema_fields)
-    prompt = f"""Extract the following fields from the page content:
-FIELDS TO EXTRACT: {fields_list}
-
-PAGE CONTENT:
-{inner_text[:15000]}
-
-INSTRUCTIONS:
-1. Find ALL items/records that match the requested fields.
-2. If there are MULTIPLE items (like a list of products, jobs, etc.), return a JSON array with ALL of them.
-3. For each item, extract the EXACT values from the page content.
-4. If a field is not found for an item, use empty string.
-5. Return ONLY valid JSON - either an array of objects OR a single object.
-
-Example for MULTIPLE items:
-{{"items": [{{"name": "Product 1", "price": "$10"}}, {{"name": "Product 2", "price": "$20"}}]}}
-
-Example for SINGLE item:
-{{"job_title": "Software Engineer", "city": "New York"}}
-
-Return ONLY the JSON, no other text."""
+    prompt = SCHEMA_EXTRACTION_USER_TEMPLATE.format(
+        fields_list=fields_list,
+        content_snippet=inner_text[:15000]
+    )
 
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are a data extraction assistant. Extract ALL structured data from web page content. "
-                "If there are multiple items, return them ALL as a JSON array. Output ONLY valid JSON."
-            ),
+            "content": SCHEMA_EXTRACTION_SYSTEM_PROMPT,
         },
         {"role": "user", "content": prompt},
     ]
@@ -1194,22 +1113,11 @@ def _run_attribute_extraction(
     combined_snippet = "\n---\n".join(snippets[:3])[:15000]
     
     # Ask LLM to generate a STRUCTURAL regex - NOT content-based!
-    regex_prompt = (
-        f"Analyze this HTML and generate a regex to extract '{attribute}' attribute values for '{target}'.\n\n"
-        f"CRITICAL REQUIREMENTS:\n"
-        f"1. The regex must match the HTML STRUCTURE/PATTERN, NOT the specific text content\n"
-        f"2. DO NOT include any specific text like job titles, names, or dynamic content in the regex\n"
-        f"3. Match based on: tag names, CSS classes, parent elements, attribute patterns\n"
-        f"4. The regex should work even when the page content changes (new jobs, products, etc.)\n"
-        f"5. Capture ONLY the '{attribute}' attribute value\n\n"
-        f"Example of WRONG regex: <a href=\"([^\"]+)\"[^>]*>.*?Senior Developer.*?</a>\n"
-        f"Example of CORRECT regex: <a[^>]*class=\"job-link\"[^>]*href=\"([^\"]+)\"[^>]*>\n\n"
-        f"The visible text in target elements includes (for context only, DO NOT embed in regex):\n"
-        f"{text_examples[:3]}\n\n"
-        f"HTML SAMPLE:\n{combined_snippet}\n\n"
-        f"Analyze the HTML structure around these elements and create a STRUCTURAL pattern.\n"
-        f"Return ONLY a JSON object:\n"
-        f'{{"regex": "structural_pattern", "flags": "is", "explanation": "what structural pattern you identified"}}'
+    regex_prompt = ATTRIBUTE_EXTRACTION_USER_TEMPLATE.format(
+        attribute=attribute,
+        target=target,
+        text_examples=text_examples[:3],
+        combined_snippet=combined_snippet
     )
     
     pattern = None

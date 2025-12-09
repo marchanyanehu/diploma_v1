@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from services.ai_worker.tasks import process_content, _find_candidates_in_html
+from services.ai_worker.tasks import process_content, _find_text_in_raw_content
 from datetime import datetime, timezone
 
 @patch('services.ai_worker.tasks.SessionLocal')
@@ -69,7 +69,7 @@ def test_process_content_optimized_flow(mock_db_utils, mock_llm_cls, mock_sessio
 def test_find_candidates():
     html = "<div>abc</div><div>def</div><div>abc again</div>"
     examples = ["abc"]
-    candidates = _find_candidates_in_html(html, examples)
+    candidates = _find_text_in_raw_content(html, examples)
     # Deduplication should merge these into one candidate since snippet window covers both
     # Wait, dedupe logic: if snippet not in seen_snippets.
     # Snippet window is 200 chars radius. "<div>abc...</div>" and "<div>abc again</div>" likely overlap or identical snippet?

@@ -62,67 +62,16 @@ __all__ = [
 ]
 
 
-# ---------------------------- Prompt Engineering --------------------------- #
+from shared.prompts import (
+    REGEX_GENERATION_SYSTEM_PROMPT,
+    REGEX_GENERATION_RULES,
+    REGEX_GENERATION_ATTRIBUTE_USER_TEMPLATE,
+    REGEX_GENERATION_STANDARD_USER_TEMPLATE,
+    REGEX_GENERATION_MULTILINE_USER_TEMPLATE
+)
 
-_SYSTEM_INSTRUCTION = """You are a specialized AI assistant that generates **generalized, production-grade regular expressions** from provided JSON or HTML snippets.
-
-## Global Assumptions
-* **DOTALL is enabled** (`.` matches newlines). Do **not** add inline `(?s)`.
-* **Never wrap** the regex in language/framework scopes or delimiters (no `/.../`, no flags outside the pattern).
-* **Always escape curly braces** as `\\{` and `\\}` inside the pattern when matching literal braces.
-
-## Generalization Rules (Must Follow)
-Your regexes **must be reusable across pages/jobs with similar structure**. Do **not** bake in page-specific details.
-
-**Avoid page-specific anchors**
-* Do not use full URLs, numeric IDs that look auto-generated, GUIDs, timestamps, build hashes, or long opaque tokens.
-* Do not bind to exact tag names (`div`, `h1`, `a`) if an attribute-level anchor exists. Prefer stable attributes.
-* Do not rely on complete class lists; **bind to the stable, structural subset** of class names and allow variance around it.
-
-**Prefer structural, tolerant anchors**
-* Use stable `class`/`id` fragments; when binding by class, **omit styling/size/animation tokens** and allow other attributes via `[^>]*?`.
-* Allow optional whitespace with lazy spacing (`\\s*?` or `\\s*`) near boundaries.
-* When nested markup may appear, allow it with non-capturing skips like `(?:<[^>]+>)*`.
-* Use **lazy quantifiers** and **tempered patterns** to avoid runaway greed.
-
-**Capture only what you need**
-* Use a **single capturing group** for the target value. Use `(?: ... )` for all non-target grouping.
-* Trim leading/trailing whitespace in the capture by placing `\\s*` **outside** the group when appropriate.
-
-**JSON-specific guidance**
-* Keys: match with tolerance around separators: `"key"\\s*:\\s*"([^"]+)"`.
-* For URL values: `"hostedUrl"\\s*:\\s*"(https?://[^"]+)"` or `"applyUrl"\\s*:\\s*"(https?://[^"]+)"`.
-* String values: capture with `([^"]+)` for simple strings, `(https?://[^"]+)` for URLs.
-* Arrays: `"items"\\s*:\\s*\\[` then iterate with `"url"\\s*:\\s*"([^"]+)"`.
-
-**HTML-specific guidance**
-* Anchor on **stable attribute fragments** (`class`, `id`) not tag names; allow attribute variability via `[^>]*?`.
-* For href extraction: `href="(https?://[^"]+)"` with appropriate context anchors.
-* Text extraction: anchor → allow attributes → optional whitespace → **capture inner text non-greedily** → stop at next tag.
-
-## Safety & Performance
-* Keep patterns as **specific as needed but no more**: prefer character classes/tempered tokens to `.*?` when a safe boundary exists.
-* Avoid catastrophic backtracking: prefer `[^"]*` over `.*?` for JSON string capture.
-
-You output ONLY strict JSON following the schema. Never include commentary, code fences, or additional text."""
-
-_GENERATION_RULES = """## Output Format (Strict)
-Output ONLY a JSON object with these keys:
-- "regex": the raw pattern (no delimiters, properly escaped for JSON)
-- "flags": combination of i,m,s (usually empty or "s")
-- "extraction_mode": "group" (single capturing group) or "findall"
-- "explanation": brief reason (<= 240 chars)
-- "confidence": 0..1 self-assessed confidence
-
-## Rules
-1. Output ONLY JSON (no backticks, no prose).
-2. Use non-greedy quantifiers. Avoid catastrophic backtracking.
-3. Prefer explicit character classes over '.*' when possible.
-4. Single capturing group for the target value only.
-5. Generalize variable segments (use \\d+, [A-Za-z]+, etc. not literals).
-6. Keep pattern length < 500 chars.
-7. Escape literal special chars: . + ? ( ) [ ] { } | ^ $ /
-8. Do NOT include page-specific IDs, GUIDs, timestamps, or full URLs in pattern."""
+_SYSTEM_INSTRUCTION = REGEX_GENERATION_SYSTEM_PROMPT
+_GENERATION_RULES = REGEX_GENERATION_RULES
 
 _JSON_EXAMPLE = (
     '{"regex": "\\"hostedUrl\\"\\\\s*:\\\\s*\\"(https?://[^\\"]*)\\"",'
@@ -150,17 +99,11 @@ def build_generation_messages(
     """
     if is_attribute_extraction:
         # Special prompt for attribute extraction (e.g. URLs, IDs) where examples are anchors
-        user = (
-            f"TARGET: {target_desc}\n"
-            f"CONTEXT/ANCHORS: The following text strings appear near the target data (e.g. link text for a URL):\n{_examples_block(examples)}\n\n"
-            f"CONTENT SNIPPET (generate a generalized regex that works on similar content):\n"
-            f"<<<SNIPPET_START>>>\n{snippet[:32000]}\n<<<SNIPPET_END>>>\n\n"
-            f"INSTRUCTIONS:\n"
-            f"1. The examples provided are ANCHORS (e.g. clickable text), not the target value itself.\n"
-            f"2. You must generate a regex that locates these anchors but CAPTURES the '{target_desc}' (e.g. href, src, id) associated with them.\n"
-            f"3. Example: If target is 'URL' and anchor is 'Apply', regex might be: <a[^>]*href=\"([^\"]+)\"[^>]*>\\s*Apply\n"
-            f"4. The regex must be generalized to work for similar items.\n\n"
-            f"{_GENERATION_RULES}"
+        user = REGEX_GENERATION_ATTRIBUTE_USER_TEMPLATE.format(
+            target_desc=target_desc,
+            examples_block=_examples_block(examples),
+            snippet=snippet[:32000],
+            generation_rules=_GENERATION_RULES
         )
     else:
         # Standard text extraction
@@ -175,32 +118,18 @@ def build_generation_messages(
         
         if has_multiline_example:
             # For multi-line/block content (descriptions, articles, etc.)
-            user = (
-                f"TARGET: {target_desc}\n\n"
-                f"EXPECTED TEXT CONTENT (this is the inner text, not exact HTML):\n{_examples_block(examples)}\n\n"
-                f"HTML SNIPPET:\n"
-                f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
-                f"CRITICAL INSTRUCTIONS:\n"
-                f"1. ONLY match visible HTML elements (<h1>, <p>, <div>, <li>, etc.) - NOT JSON or script content.\n"
-                f"2. IGNORE any embedded JSON like \"title\":\"...\" - these are data structures, not visible text.\n"
-                f"3. Look for the EXACT example text within HTML tags in the snippet.\n"
-                f"4. For titles: <h1[^>]*>([^<]+)</h1> or similar\n"
-                f"5. For descriptions: find the container div/section with a stable class, then capture its contents.\n"
-                f"6. The captured text MUST match the examples provided.\n\n"
-                f"{_GENERATION_RULES}"
+            user = REGEX_GENERATION_MULTILINE_USER_TEMPLATE.format(
+                target_desc=target_desc,
+                examples_block=_examples_block(examples),
+                marked_snippet=marked_snippet,
+                generation_rules=_GENERATION_RULES
             )
         else:
-            user = (
-                f"TARGET: {target_desc}\n\n"
-                f"EXAMPLES (the regex MUST capture each of these exactly as shown):\n{_examples_block(examples)}\n\n"
-                f"CONTENT SNIPPET (examples are marked with [[EXAMPLE→]]...[[←EXAMPLE]]):\n"
-                f"<<<SNIPPET_START>>>\n{marked_snippet}\n<<<SNIPPET_END>>>\n\n"
-                f"INSTRUCTIONS:\n"
-                f"1. Find the [[EXAMPLE→]]...[[←EXAMPLE]] markers in the snippet.\n"
-                f"2. Look at the HTML tags/classes IMMEDIATELY before each marker - that's your anchor.\n"
-                f"3. Build a regex using THOSE specific tags/classes to capture text in that position.\n"
-                f"4. Do NOT use other classes from elsewhere in the snippet.\n\n"
-                f"{_GENERATION_RULES}"
+            user = REGEX_GENERATION_STANDARD_USER_TEMPLATE.format(
+                target_desc=target_desc,
+                examples_block=_examples_block(examples),
+                marked_snippet=marked_snippet,
+                generation_rules=_GENERATION_RULES
             )
         
     return [
@@ -317,6 +246,7 @@ def validate_regex(
     # Filter out None values from matches (can happen with optional capture groups)
     matches = [m for m in matches if m is not None]
     result["matches"] = matches
+    result["distinct_matches"] = list(set(matches))
     
     # 4. Check Constraints
     if not matches:
