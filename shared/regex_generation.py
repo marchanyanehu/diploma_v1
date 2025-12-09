@@ -219,7 +219,6 @@ def build_refinement_messages(
 ) -> List[Dict[str, str]]:
     """Build chat messages for refinement (fix-it) prompt."""
     prev = json.dumps(previous_json, ensure_ascii=False)
-    fail = json.dumps(failures, ensure_ascii=False)
     
     missing_examples = failures.get("missing_examples", [])
     issues = failures.get("issues", [])
@@ -391,9 +390,10 @@ def validate_regex(
         result["missing_examples"] = missing
         result["issues"].append(f"Failed to match {len(missing)}/{len(examples)} provided examples")
     
-    # 6. Check precision - if we match WAY more than examples, pattern is too broad
-    # Allow up to 10x the example count as reasonable, but flag more
-    if len(examples) > 0 and len(unique_matches) > len(examples) * 10:
+    # 6. Check precision - if we match WAY more than examples, pattern might be too broad
+    # Allow generous headroom for list pages / APIs with many items (e.g., 200x the examples, capped)
+    broad_threshold = max(len(examples) * 200, 2000)
+    if len(examples) > 0 and len(unique_matches) > broad_threshold:
         result["issues"].append(f"Pattern too broad: {len(unique_matches)} matches for {len(examples)} examples")
         
     # Final Success Determination

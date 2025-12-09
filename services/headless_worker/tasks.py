@@ -15,6 +15,34 @@ from shared.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+USER_AGENTS = [
+    # Rotate a few modern Chrome UA strings to avoid static fingerprints
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.142 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.207 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.122 Safari/537.36",
+]
+
+VIEWPORTS = [
+    {"width": 1920, "height": 1080},
+    {"width": 1680, "height": 1050},
+    {"width": 1366, "height": 768},
+]
+
+STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+window.chrome = window.chrome || { runtime: {} };
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4] });
+const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (originalQuery) {
+  window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+      ? Promise.resolve({ state: Notification.permission })
+      : originalQuery(parameters)
+  );
+}
+"""
+
 async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, Any]], int, datetime, datetime]:
     started = datetime.now(timezone.utc)
     network_events: list[dict[str, Any]] = []
@@ -22,14 +50,52 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, 
     async with async_playwright() as p:
         # Launch options
         headless = os.getenv("PLAYWRIGHT_HEADLESS", "true").lower() == "true"
-        browser = await p.chromium.launch(headless=headless)
+        proxy_url = os.getenv("PLAYWRIGHT_PROXY")
+        proxy_username = os.getenv("PLAYWRIGHT_PROXY_USERNAME")
+        proxy_password = os.getenv("PLAYWRIGHT_PROXY_PASSWORD")
+        proxy = None
+        if proxy_url:
+            proxy = {"server": proxy_url}
+            if proxy_username and proxy_password:
+                proxy["username"] = proxy_username
+                proxy["password"] = proxy_password
+
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+        ]
+        browser = await p.chromium.launch(
+            headless=headless,
+            args=launch_args,
+            ignore_default_args=["--enable-automation"],
+            proxy=proxy,
+        )
         
         # Context options (stealth)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US"
+        ua = random.choice(USER_AGENTS)
+        viewport = random.choice(VIEWPORTS)
+        tz = os.getenv("PLAYWRIGHT_TIMEZONE", "America/Los_Angeles")
+        lang = os.getenv("PLAYWRIGHT_LANG", "en-US,en;q=0.9")
+        sec_ch_ua = os.getenv(
+            "PLAYWRIGHT_SEC_CH_UA",
+            '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
         )
+        context = await browser.new_context(
+            user_agent=ua,
+            viewport=viewport,
+            locale="en-US",
+            timezone_id=tz,
+            device_scale_factor=1,
+            extra_http_headers={
+                "Accept-Language": lang,
+                "sec-ch-ua": sec_ch_ua,
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+            },
+        )
+        await context.add_init_script(STEALTH_INIT_SCRIPT)
         
         page = await context.new_page()
         
@@ -61,7 +127,7 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, 
                         "body_truncated": truncated,
                         "headers": response.headers
                     })
-            except Exception as e:
+            except Exception:
                 # Ignore errors during capture to not break flow
                 pass
 
@@ -72,6 +138,7 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, 
             timeout = int(os.getenv("PLAYWRIGHT_NAV_TIMEOUT_MS", "30000"))
             wait_until = os.getenv("PLAYWRIGHT_WAIT_UNTIL", "networkidle")
             await page.goto(url, timeout=timeout, wait_until=wait_until)
+            await page.wait_for_timeout(random.randint(800, 1800))
             
             # Try to dismiss common cookie consent banners
             try:
