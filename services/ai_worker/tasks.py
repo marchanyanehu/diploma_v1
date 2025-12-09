@@ -91,9 +91,7 @@ def _filter_values_via_llm(values: List[str], target: str, llm: LLMClient) -> Li
     # Deduplicate
     unique_values = list(dict.fromkeys(values))
     
-    # If we have too many values, we might need to batch, but for now let's cap at 100
-    # to avoid massive prompts. If > 100, we assume they are mostly correct or we filter top 100.
-    # A better approach would be to chunk, but let's start simple.
+
     chunk = unique_values[:100]
     
     prompt = (
@@ -115,15 +113,9 @@ def _filter_values_via_llm(values: List[str], target: str, llm: LLMClient) -> Li
         data = _json.loads(resp)
         valid = data.get("valid_values", [])
         
-        # If valid is empty but we had inputs, and it's not obvious why, 
-        # it might be an LLM error. But we trust the filter for now.
-        
-        # Restore the rest of the values if we truncated
+
         if len(unique_values) > 100:
-            # We only filtered the first 100. The rest are returned as is (risky) 
-            # or we drop them? Let's append them but log warning.
-            # Actually, let's just return what we verified + the rest? No, inconsistent.
-            # Let's just filter the top 100.
+
             pass
             
         return [str(v) for v in valid]
