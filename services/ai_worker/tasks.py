@@ -768,11 +768,15 @@ Your JSON response:"""
             regex_pattern = result.get("regex", "")
             flags = result.get("flags", "s")
             
+            # Handle intentionally empty regex (LLM couldn't find reliable pattern)
+            if not regex_pattern:
+                logger.info(f"LLM returned empty regex for '{field_name}' - no reliable structural pattern found")
+                return None
+            
             # Log the generated regex for debugging
             logger.info(f"Generated regex for '{field_name}': {regex_pattern[:150]}... (flags: {flags})")
             
-            if regex_pattern:
-                return {"regex": regex_pattern, "flags": flags}
+            return {"regex": regex_pattern, "flags": flags}
         
         logger.warning(f"Failed to parse regex response for {field_name}: {raw[:200]}")
     except Exception as e:
@@ -782,7 +786,7 @@ Your JSON response:"""
 
 
 def _run_schema_extraction_with_cache(
-    task_id: str, url: str, schema_fields: List[str], inner_text: str, 
+    task_id: str, url: str, schema_fields: List[str], inner_text: str,
     html_content: str, llm: LLMClient, db, domain: str
 ) -> tuple[List[Dict[str, Any]], bool]:
     """Extract data with LLM, then generate and cache regexes for reuse.
@@ -1056,6 +1060,58 @@ Return ONLY the JSON, no other text."""
                               field=field, reason="no_matches", regex_pattern=pattern[:100])
             except Exception as e:
                 _log_event(task_id, "schema_field_regex_validation_error", field=field, error=str(e), regex_pattern=pattern[:100] if pattern else "none")
+
+    # Identify fields that failed regex generation or validation
+    failed_fields = [f for f in schema_fields if f in field_examples and field_examples[f] and f not in validated_field_regexes]
+    
+    # Retry failed fields using single-field extraction approach
+    if failed_fields and db:
+        _log_event(task_id, "schema_regex_retry_start", failed_fields=failed_fields)
+        
+        for field in failed_fields:
+            examples = field_examples.get(field, [])
+            if not examples:
+                continue
+            
+            try:
+                # Create a pseudo-intent for single-field extraction
+                field_intent = {
+                    "target": field,
+                    "keywords": [field] + [ex[:30] for ex in examples[:2]],  # Use field name + example prefixes as keywords
+                }
+                
+                # Find micro-snippets around examples in HTML for better context
+                snippets = []
+                for ex in examples[:3]:
+                    if ex and ex in html_content:
+                        idx = html_content.find(ex)
+                        start = max(0, idx - 150)
+                        end = min(len(html_content), idx + len(ex) + 150)
+                        snippets.append(html_content[start:end])
+                
+                snippet_to_use = "\n---\n".join(snippets[:3]) if snippets else html_content[:4000]
+                best_snippet = html_content[:4000]
+                
+                # Use the single-field extraction which has iterative refinement
+                single_result = _run_single_field_extraction(
+                    task_id=f"{task_id}_retry_{field}",
+                    url=url,
+                    intent=field_intent,
+                    example_texts=examples[:5],
+                    search_content=html_content,
+                    best_snippet=best_snippet,
+                    snippet_to_use=snippet_to_use,
+                    llm=llm,
+                    db=db  # Allow caching - will be stored as CONTENT type
+                )
+                
+                if single_result:
+                    _log_event(task_id, "schema_field_retry_success", field=field, match_count=len(single_result))
+                else:
+                    _log_event(task_id, "schema_field_retry_failed", field=field)
+                    
+            except Exception as e:
+                _log_event(task_id, "schema_field_retry_error", field=field, error=str(e))
 
     # Cache only validated regexes
     if validated_field_regexes:
