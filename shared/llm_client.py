@@ -50,6 +50,10 @@ DEFAULT_PROVIDER = "baseten"
 DEFAULT_MODEL = "baseten/deepseek-ai/DeepSeek-V3.2"
 DEFAULT_FALLBACK_PROVIDER = "gemini"
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+PROVIDER_MAX_TOKEN_LIMITS = {
+    # Baseten DeepSeek returns 400s if max_tokens exceeds 262_144
+    "baseten": 262_144,
+}
 
 
 def _resolve_model_name(provider: str, model: str) -> str:
@@ -66,6 +70,34 @@ def _resolve_model_name(provider: str, model: str) -> str:
         return model if model.startswith("baseten/") else f"baseten/{model}"
     # Future providers could be normalized here
     return model
+
+
+def _clamp_max_tokens(provider: str, fallback_provider: Optional[str], max_tokens: Optional[int]) -> Optional[int]:
+    """Clamp max_tokens to the lowest known provider limit to avoid BadRequest errors."""
+    if max_tokens is None:
+        return None
+
+    limits: List[int] = []
+    for p in (provider, fallback_provider):
+        if not p:
+            continue
+        limit = PROVIDER_MAX_TOKEN_LIMITS.get(p.lower())
+        if limit:
+            limits.append(limit)
+
+    if not limits:
+        return max_tokens
+
+    allowed = min(limits)
+    if max_tokens > allowed:
+        logger.warning(
+            "Configured max_tokens=%s exceeds provider limit (%s); clamping to %s",
+            max_tokens,
+            allowed,
+            allowed,
+        )
+        return allowed
+    return max_tokens
 
 
 @dataclass
@@ -149,7 +181,8 @@ class LLMClient:
         max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
         max_tokens_env = os.getenv("LLM_MAX_TOKENS")
-        max_tokens = int(max_tokens_env) if max_tokens_env else None
+        max_tokens_raw = int(max_tokens_env) if max_tokens_env else None
+        max_tokens = _clamp_max_tokens(provider, fallback_provider, max_tokens_raw)
 
         log_payloads = os.getenv("LLM_LOG_PAYLOADS", "false").lower() in {"1", "true", "yes"}
         cfg = LLMClientConfig(
