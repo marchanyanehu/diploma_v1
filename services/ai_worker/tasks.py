@@ -670,50 +670,111 @@ def _generate_field_regex(field_name: str, examples: List[str], html_content: st
     if not examples:
         return None
     
-    # Find where examples appear in HTML to get context
+    # Find where examples appear in HTML to get context - use more examples and larger context
     snippets = []
-    for ex in examples[:3]:  # Use first 3 examples
+    for ex in examples[:5]:  # Use first 5 examples for better pattern detection
         if not ex:
             continue
-        idx = html_content.find(str(ex))
-        if idx != -1:
-            start = max(0, idx - 100)
-            end = min(len(html_content), idx + len(str(ex)) + 100)
-            snippets.append(html_content[start:end])
+        # Escape special regex chars for searching
+        escaped_ex = re.escape(str(ex))
+        # Try to find the example in HTML
+        match = re.search(escaped_ex, html_content)
+        if match:
+            idx = match.start()
+            # Larger context window (300 chars each side) to capture full HTML structure
+            start = max(0, idx - 300)
+            end = min(len(html_content), idx + len(str(ex)) + 300)
+            snippet = html_content[start:end]
+            # Avoid duplicate snippets
+            if snippet not in snippets:
+                snippets.append(snippet)
     
     if not snippets:
+        logger.warning(f"No HTML snippets found for field '{field_name}' with examples: {examples[:3]}")
         return None
     
-    # Ask LLM to generate regex
-    snippet_text = "\n---\n".join(snippets[:3])
-    prompt = f"""Generate a regex to extract "{field_name}" values from HTML.
+    # Show more examples to LLM
+    examples_text = chr(10).join(f'- "{ex}"' for ex in examples[:10])
+    snippet_text = "\n---\n".join(snippets[:5])
+    
+    prompt = f"""Generate a regex to extract ALL "{field_name}" values from HTML.
 
-EXAMPLE VALUES TO MATCH:
-{chr(10).join(f'- {ex}' for ex in examples[:5])}
+EXAMPLE VALUES THAT MUST BE MATCHED (there are {len(examples)} total):
+{examples_text}
 
 HTML SNIPPETS WHERE THESE VALUES APPEAR:
 {snippet_text}
 
-INSTRUCTIONS:
-1. Create a regex that captures these values from the HTML structure.
-2. Use a single capturing group for the target value.
-3. The regex should be general enough to match similar items on the page.
-4. Output ONLY a JSON object with "regex" and "flags" keys.
+## STRICT RULES - FOLLOW EXACTLY
 
-Example output: {{"regex": "<span class=\\"price\\">\\\\$([\\\\d.]+)</span>", "flags": "s"}}"""
+### Global Assumptions
+* DOTALL is enabled (`.` matches newlines). Do NOT add inline `(?s)`.
+* Always escape curly braces as `\\{{` and `\\}}`.
+
+### Output Format
+Output ONLY: {{"regex": "YOUR_PATTERN", "flags": "s"}}
+No explanations. No comments. No extra keys.
+
+### CRITICAL: Avoid Literal Text Anchors
+❌ NEVER include literal words/phrases from the page content in your regex.
+❌ NEVER use text like "Būklė", "Price:", "Posted:", category names, or any natural language text.
+❌ NEVER anchor on specific values that appear in the examples themselves.
+❌ NEVER use Unicode characters from the page content.
+
+### CRITICAL: Avoid Page-Specific Anchors  
+❌ Do NOT use full URLs, numeric IDs, GUIDs, timestamps, hashes.
+❌ Do NOT use overly generic class names like "title", "text", "content" alone - they match too many elements.
+❌ Do NOT bind to complete class lists; use only the most specific/stable fragment.
+
+### MUST: Use Structural Anchors Only
+✅ Anchor ONLY on stable class/id attribute fragments that are specific to the data type.
+✅ Look for class names that indicate the semantic meaning (e.g., "listing-title", "item-price", "post-date").
+✅ Use `[^>]*?` to allow attribute variability.
+✅ Use `[^<]+?` for text content, `[^"]+` for attribute values.
+
+### Pattern Templates
+Text in element: `class="specific-class[^"]*"[^>]*>\\s*([^<]+?)\\s*</`
+Attribute value: `class="specific-class[^"]*"[^>]*?href="([^"]+)"`
+
+### Failure Behavior
+If you cannot find a reliable structural anchor, output: {{"regex": "", "flags": "s"}}
+It is BETTER to return empty than to create a brittle regex.
+
+Your JSON response:"""
 
     try:
         messages = [
-            {"role": "system", "content": "You are a regex expert. Generate precise regex patterns to extract data from HTML. Output ONLY valid JSON."},
+            {
+                "role": "system", 
+                "content": (
+                    "You are a regex expert. Your task is to generate STRUCTURAL regex patterns for HTML data extraction. "
+                    "CRITICAL RULES:\n"
+                    "1. NEVER use literal text from the page (words, phrases, labels) in your regex.\n"
+                    "2. ONLY anchor on HTML class/id attributes that are specific to the data structure.\n"
+                    "3. Use single capturing group for the target value.\n"
+                    "4. Output ONLY valid JSON: {\"regex\": \"...\", \"flags\": \"s\"}\n"
+                    "5. Return empty regex if no reliable structural pattern exists."
+                )
+            },
             {"role": "user", "content": prompt}
         ]
-        raw = llm.chat(messages, temperature=0.1)
+        # Use temperature=0 for maximum consistency and rule-following
+        raw = llm.chat(messages, temperature=0.0, extra_params={"top_p": 0.1})
         
         # Parse response
         match = re.search(r'\{[^{}]*"regex"[^{}]*\}', raw, re.DOTALL)
         if match:
             result = _json.loads(match.group(0))
-            return {"regex": result.get("regex", ""), "flags": result.get("flags", "s")}
+            regex_pattern = result.get("regex", "")
+            flags = result.get("flags", "s")
+            
+            # Log the generated regex for debugging
+            logger.info(f"Generated regex for '{field_name}': {regex_pattern[:150]}... (flags: {flags})")
+            
+            if regex_pattern:
+                return {"regex": regex_pattern, "flags": flags}
+        
+        logger.warning(f"Failed to parse regex response for {field_name}: {raw[:200]}")
     except Exception as e:
         logger.warning(f"Failed to generate regex for {field_name}: {e}")
     
@@ -918,9 +979,87 @@ Return ONLY the JSON, no other text."""
                     field_regexes[field] = regex_result
                     _log_event(task_id, "schema_field_regex_generated", field=field)
 
-    # Cache the combined regexes for future use (even if not all fields matched)
+    # Validate regexes before caching - ensure they match LLM-extracted values
+    validated_field_regexes = {}
     if field_regexes:
-        combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
+        _log_event(task_id, "schema_regex_validation_start", field_count=len(field_regexes))
+        
+        for field, regex_info in field_regexes.items():
+            pattern = regex_info.get("regex", "")
+            flags = regex_info.get("flags", "s")
+            expected_values = field_examples.get(field, [])
+            
+            if not pattern or not expected_values:
+                continue
+            
+            # Apply regex to get matches
+            try:
+                regex_matches = _apply_regex_matches(pattern, flags, html_content)
+                if regex_matches:
+                    # Clean matches - normalize whitespace for comparison
+                    cleaned_matches = []
+                    for m in regex_matches:
+                        clean = _strip_html_to_text(m) if _looks_like_html(m) else m
+                        if clean:
+                            # Normalize whitespace: collapse multiple spaces/newlines to single space
+                            normalized = ' '.join(clean.split())
+                            cleaned_matches.append(normalized)
+                    
+                    # Validate: check how many LLM values are found in regex matches
+                    matched_count = 0
+                    for expected in expected_values:
+                        # Normalize expected value the same way
+                        expected_normalized = ' '.join(expected.split())
+                        
+                        # Check for match with multiple strategies
+                        for m in cleaned_matches:
+                            # Exact match
+                            if expected_normalized == m:
+                                matched_count += 1
+                                break
+                            # Substring match (expected in regex match or vice versa)
+                            if expected_normalized in m or m in expected_normalized:
+                                matched_count += 1
+                                break
+                            # Prefix match (first 50 chars) - handles truncation
+                            if len(expected_normalized) > 50 and len(m) > 50:
+                                if expected_normalized[:50] == m[:50]:
+                                    matched_count += 1
+                                    break
+                            # Significant overlap check (for partial matches)
+                            if len(expected_normalized) > 20 and len(m) > 20:
+                                # Check if first 30 chars match
+                                if expected_normalized[:30] in m or m[:30] in expected_normalized:
+                                    matched_count += 1
+                                    break
+                    
+                    match_rate = matched_count / len(expected_values) if expected_values else 0
+                    _log_event(task_id, "schema_field_regex_validation", 
+                              field=field, 
+                              expected_count=len(expected_values),
+                              regex_match_count=len(cleaned_matches),
+                              validated_count=matched_count,
+                              match_rate=round(match_rate, 2))
+                    
+                    # Only keep regex if it matches at least 60% of LLM values (lowered from 70%)
+                    if match_rate >= 0.6:
+                        validated_field_regexes[field] = regex_info
+                        _log_event(task_id, "schema_field_regex_validated", field=field)
+                    else:
+                        _log_event(task_id, "schema_field_regex_rejected", 
+                                  field=field, reason="low_match_rate", match_rate=round(match_rate, 2),
+                                  regex_pattern=pattern[:100],
+                                  sample_expected=[' '.join(v.split())[:80] for v in expected_values[:3]],
+                                  sample_got=[m[:80] for m in cleaned_matches[:3]])
+                else:
+                    _log_event(task_id, "schema_field_regex_rejected", 
+                              field=field, reason="no_matches", regex_pattern=pattern[:100])
+            except Exception as e:
+                _log_event(task_id, "schema_field_regex_validation_error", field=field, error=str(e), regex_pattern=pattern[:100] if pattern else "none")
+
+    # Cache only validated regexes
+    if validated_field_regexes:
+        combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": validated_field_regexes})
         try:
             db_utils.record_new_parser(
                 db,
@@ -934,9 +1073,14 @@ Return ONLY the JSON, no other text."""
                 sample_input=html_content[:2000],
                 sample_output=[{"text": d["text"]} for d in extracted_data[:5]],
             )
-            _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
+            _log_event(task_id, "schema_regex_cached", 
+                      fields=list(validated_field_regexes.keys()),
+                      validated_count=len(validated_field_regexes),
+                      total_generated=len(field_regexes))
         except Exception as e:
             logger.warning(f"Failed to cache schema regex: {e}")
+    else:
+        _log_event(task_id, "schema_regex_not_cached", reason="no_validated_regexes")
 
     _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
     return extracted_data, False  # Not from cache - newly extracted via LLM

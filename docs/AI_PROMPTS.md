@@ -183,8 +183,9 @@ The system **never sends full HTML to the LLM**. Instead, it extracts focused sn
 
 Execution model (current):
 - LLM is used to propose examples and generate regex.
-- **Only regex matches are returned**. If regex generation or matching fails, the field is marked unavailable (no LLM fallback).
-- Schema extraction also returns regex-only results (LLM output is used only to seed regex generation).
+- **Schema extraction returns LLM-extracted data directly** with properly associated fields. Regex is generated and validated for caching purposes only.
+- Single-field extraction returns regex matches only. If regex generation or matching fails, the field is marked unavailable.
+- Regex patterns are **validated against LLM output** before caching - patterns must achieve ≥60% match rate.
 
 This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page; regex runs locally on the full captured content.
 
@@ -198,12 +199,25 @@ You are a specialized AI assistant that generates **generalized, production-grad
 * **Never wrap** the regex in language/framework scopes or delimiters (no `/.../`).
 * **Always escape curly braces** as `\\{` and `\\}` inside the pattern.
 
+## CRITICAL: Avoid Literal Text Anchors
+* ❌ NEVER include literal words/phrases from the page content in your regex.
+* ❌ NEVER use text like "Price:", "Posted:", category names, or any natural language text.
+* ❌ NEVER anchor on specific values that appear in the examples themselves.
+* ❌ NEVER use Unicode characters from the page content.
+
+## CRITICAL: Avoid Page-Specific Anchors  
+* ❌ Do NOT use full URLs, numeric IDs, GUIDs, timestamps, hashes.
+* ❌ Do NOT use overly generic class names like "title", "text", "content" alone - they match too many elements.
+* ❌ Do NOT bind to complete class lists; use only the most specific/stable fragment.
+
+## MUST: Use Structural Anchors Only
+* ✅ Anchor ONLY on stable class/id attribute fragments specific to the data type.
+* ✅ Look for class names indicating semantic meaning (e.g., "listing-title", "item-price").
+* ✅ Use `[^>]*?` to allow attribute variability.
+* ✅ Use `[^<]+?` for text content, `[^"]+` for attribute values.
+
 ## Generalization Rules (Must Follow)
 Your regexes **must be reusable across pages/jobs with similar structure**.
-
-**Avoid page-specific anchors**
-* Do not use full URLs, numeric IDs, GUIDs, timestamps, build hashes.
-* Do not bind to exact tag names if an attribute-level anchor exists.
 
 **Prefer structural, tolerant anchors**
 * Use stable `class`/`id` fragments; allow other attributes via `[^>]*?`.
@@ -253,7 +267,18 @@ BASE RULES:
 
 ### Validation Heuristics
 
-Before accepting a generated regex, `validate_regex()` enforces:
+Before accepting a generated regex, the system enforces validation:
+
+**Schema Extraction Regex Validation** (`_run_schema_extraction_with_cache`):
+
+| Check | Threshold | Reason |
+|-------|-----------|--------|
+| LLM value matching | ≥ 60% match rate | Regex must match most LLM-extracted values |
+| Whitespace normalization | Applied | Collapses whitespace before comparison |
+| Prefix matching | First 30-50 chars | Handles truncation/formatting differences |
+| Substring matching | Both directions | Expected in match OR match in expected |
+
+**Single-Field Regex Validation** (`validate_regex()`):
 
 | Check | Threshold | Reason |
 |-------|-----------|--------|
@@ -285,9 +310,13 @@ Before accepting a generated regex, `validate_regex()` enforces:
 | Unicode characters | Use `.` with `s` flag or `\S+` |
 | Variable whitespace | `\s+` or `\s*` between tokens |
 | Optional elements | Non-capturing groups with `?` |
+| Literal text in regex | Validation rejects, LLM instructed to avoid |
 
 ### Integration
-Used by `shared/regex_generation.py` in `generate_regex_for_target()`. Results are cached in `ParserCache` table for reuse on the same domain/keywords. Extraction outputs come **only** from regex matches; if no regex matches, the field is omitted.
+
+**Schema Extraction**: Used by `services/ai_worker/tasks.py` in `_run_schema_extraction_with_cache()`. LLM extracts all fields with proper associations, then regexes are generated and validated for caching. Only validated regexes (≥60% match rate) are cached.
+
+**Single-Field Extraction**: Used by `shared/regex_generation.py` in `generate_regex_for_target()`. Results are cached in `ParserCache` table for reuse on the same domain/keywords.
 
 ---
 
@@ -377,11 +406,12 @@ Benefits:
 
 ### Temperature Settings
 
-| Task | Temperature | Why |
-|------|-------------|-----|
-| Intent Extraction | 0.1 | Deterministic, structured output |
-| Regex Generation | 0.0 | Precise, reproducible patterns |
-| Source Disambiguation | 0.2 | Some creativity in reasoning |
+| Task | Temperature | top_p | Why |
+|------|-------------|-------|-----|
+| Intent Extraction | 0.1 | default | Deterministic, structured output |
+| Regex Generation | 0.0 | 0.1 | Maximum precision, strict rule-following |
+| Schema Extraction | 0.1 | default | Structured JSON output |
+| Source Disambiguation | 0.2 | default | Some creativity in reasoning |
 
 ---
 
@@ -394,6 +424,10 @@ Benefits:
 | 1.2 | 2024-Q2 | Added confidence scoring | Enable quality filtering |
 | 1.3 | 2024-Q3 | Added delimiter markers | Separate code from instructions |
 | 1.4 | 2024-Q4 | Added edge case handling | Improved robustness |
+| 1.5 | 2024-12 | Schema extraction returns LLM data directly | Field association was broken by per-field regex |
+| 1.6 | 2024-12 | Added regex validation before caching | Ensured cached regexes match LLM output |
+| 1.7 | 2024-12 | Added "no literal text" rules to regex prompt | LLM was using page-specific text as anchors |
+| 1.8 | 2024-12 | Lowered temperature to 0.0 + top_p=0.1 for regex | Maximum rule adherence |
 
 ---
 

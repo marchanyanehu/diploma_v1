@@ -31,14 +31,19 @@ graph TD
     -   Captures `inner_text` (visible, up to 1MB) and `html` (structure), plus network preview.
 4.  **AI Analysis (AI Worker, `ai_queue`)**:
     -   **Step 1**: Prepare content - truncate to 32KB for LLM, keep full for regex.
-    -   **Step 2**: LLM finds *example values* in `inner_text` (e.g., specific prices/titles).
-    -   **Step 3**: Worker searches `html` for these examples (no LLM) to find *candidate snippets*.
-    -   **Step 4**: LLM selects best candidate from snippets (source disambiguation).
-    -   **Step 5**: Extract focused micro-snippets (150 chars) around examples.
-    -   **Step 6**: LLM generates RegEx using `shared/regex_generation.py`:
+    -   **Schema Extraction Path** (multi-field requests like "price, title, description"):
+        - LLM extracts all fields with proper associations directly
+        - Returns LLM-extracted data (source: "schema_llm")
+        - Generates per-field regexes and validates against LLM output
+        - Only caches regexes with ≥60% match rate
+    -   **Single-Field Extraction Path**:
+        - LLM finds *example values* in `inner_text` (e.g., specific prices/titles)
+        - Worker searches `html` for these examples (no LLM) to find *candidate snippets*
+        - LLM selects best candidate from snippets (source disambiguation)
+        - Extract focused micro-snippets (150 chars) around examples
+        - LLM generates RegEx using `shared/regex_generation.py`
         - Iterative loop: Generate → Validate → Refine (up to 3 attempts)
-        - Validation ensures pattern matches ALL examples
-    -   **Cache**: Successful regex stored per domain/keywords for reuse.
+    -   **Cache**: Successful, validated regex stored per domain/keywords for reuse.
 5.  **Extraction**: Worker applies RegEx to full content (or uses cached parser).
 6.  **Result**: Structured data saved to DB with `source` and `confidence` metadata.
 
