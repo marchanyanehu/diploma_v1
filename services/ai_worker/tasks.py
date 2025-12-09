@@ -847,132 +847,182 @@ Example for SINGLE item:
 
 Return ONLY the JSON, no other text."""
 
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a data extraction assistant. Extract ALL structured data from web page content. "
+                "If there are multiple items, return them ALL as a JSON array. Output ONLY valid JSON."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+
+    raw_response = llm.chat(
+        messages,
+        temperature=0.1,
+        extra_params={"response_format": {"type": "json_object"}},
+    )
+    _log_event(task_id, "schema_llm_response", response=raw_response[:500])
+
+    # Parse the JSON response
+    parsed_data = None
     try:
-        messages = [
-            {"role": "system", "content": "You are a data extraction assistant. Extract ALL structured data from web page content. If there are multiple items, return them ALL as a JSON array. Output ONLY valid JSON."},
-            {"role": "user", "content": prompt}
-        ]
-        
-        raw_response = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
-        _log_event(task_id, "schema_llm_response", response=raw_response[:500])
-        
-        # Parse the JSON response
-        parsed_data = None
-        try:
-            parsed_data = _json.loads(raw_response)
-        except _json.JSONDecodeError:
-            array_match = re.search(r'\[[\s\S]*\]', raw_response)
-            if array_match:
-                try:
-                    parsed_data = _json.loads(array_match.group(0))
-                except:
-                    pass
-            if parsed_data is None:
-                obj_match = re.search(r'\{[\s\S]*\}', raw_response)
-                if obj_match:
-                    try:
-                        parsed_data = _json.loads(obj_match.group(0))
-                    except:
-                        pass
-        
+        parsed_data = _json.loads(raw_response)
+    except _json.JSONDecodeError:
+        array_match = re.search(r"\[[\s\S]*\]", raw_response)
+        if array_match:
+            try:
+                parsed_data = _json.loads(array_match.group(0))
+            except Exception:
+                parsed_data = None
         if parsed_data is None:
-            _log_event(task_id, "schema_extraction_failed", error="Could not parse JSON response")
-            return [], False
+            obj_match = re.search(r"\{[\s\S]*\}", raw_response)
+            if obj_match:
+                try:
+                    parsed_data = _json.loads(obj_match.group(0))
+                except Exception:
+                    parsed_data = None
+
+    if parsed_data is None:
+        _log_event(task_id, "schema_extraction_failed", error="Could not parse JSON response")
+        return [], False
+
+    # Normalize to list of records
+    records = []
+    if isinstance(parsed_data, list):
+        records = parsed_data
+    elif isinstance(parsed_data, dict):
+        if "items" in parsed_data and isinstance(parsed_data["items"], list):
+            records = parsed_data["items"]
+        elif any(k in parsed_data for k in ["data", "results", "records", "list"]):
+            for key in ["data", "results", "records", "list"]:
+                if key in parsed_data and isinstance(parsed_data[key], list):
+                    records = parsed_data[key]
+                    break
+        else:
+            records = [parsed_data]
+
+    _log_event(task_id, "schema_records_found", count=len(records))
+
+    # Build result records
+    extracted_data = []
+    field_examples = {field: [] for field in schema_fields}
+
+    # Heuristic: collect image URLs from page to use as examples (no positional assignment)
+    image_urls_from_page: List[str] = []
+    if "image_url" in schema_fields and html_content:
+        import re as _re
+        img_pattern = r'<img[^>]+(?:data-src|src)\s*=\s*"([^"]+)"'
+        image_urls_from_page = _re.findall(img_pattern, html_content, flags=_re.IGNORECASE)
+        # Preserve order, dedupe while keeping first occurrences
+        seen_imgs = set()
+        ordered_imgs: List[str] = []
+        for u in image_urls_from_page:
+            if u not in seen_imgs:
+                ordered_imgs.append(u)
+                seen_imgs.add(u)
+        image_urls_from_page = ordered_imgs
         
-        # Normalize to list of records
-        records = []
-        if isinstance(parsed_data, list):
-            records = parsed_data
-        elif isinstance(parsed_data, dict):
-            if "items" in parsed_data and isinstance(parsed_data["items"], list):
-                records = parsed_data["items"]
-            elif any(k in parsed_data for k in ["data", "results", "records", "list"]):
-                for key in ["data", "results", "records", "list"]:
-                    if key in parsed_data and isinstance(parsed_data[key], list):
-                        records = parsed_data[key]
-                        break
-            else:
-                records = [parsed_data]
+    for record in records:
+        if not isinstance(record, dict):
+            continue
         
-        _log_event(task_id, "schema_records_found", count=len(records))
+        # Collect examples for each field (for regex generation)
+        for field in schema_fields:
+            if field in record and record[field]:
+                field_examples[field].append(str(record[field]))
         
-        # Build result records
-        extracted_data = []
-        field_examples = {field: [] for field in schema_fields}
+        # For URL fields, try to extract from HTML if not found
+        for field in schema_fields:
+            if 'url' in field.lower() and (not record.get(field) or record.get(field) == ""):
+                apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
+                apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
+                if apply_matches:
+                    full_urls = [u for u in apply_matches if u.startswith('http')]
+                    record[field] = full_urls[0] if full_urls else apply_matches[0]
+
+        # Do not positional-fill image_url; only use as regex examples
+        if "image_url" in schema_fields and record.get("image_url"):
+            field_examples["image_url"].append(str(record["image_url"]))
+
+    # If image_url examples were missing in records, seed examples from page-level images for regex generation
+    if "image_url" in schema_fields and not field_examples.get("image_url") and image_urls_from_page:
+        field_examples["image_url"].extend(image_urls_from_page[:5])
         
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            
-            # Collect examples for each field (for regex generation)
-            for field in schema_fields:
-                if field in record and record[field]:
-                    field_examples[field].append(str(record[field]))
-            
-            # For URL fields, try to extract from HTML if not found
-            for field in schema_fields:
-                if 'url' in field.lower() and (not record.get(field) or record.get(field) == ""):
-                    apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
-                    apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
-                    if apply_matches:
-                        full_urls = [u for u in apply_matches if u.startswith('http')]
-                        record[field] = full_urls[0] if full_urls else apply_matches[0]
-            
-            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
-            if text_repr:
-                extracted_data.append({
-                    "text": text_repr,
-                    "fields": record,
-                    "source": "schema_extraction",
-                    "confidence": 0.9
-                })
-        
-        # Generate and cache regex patterns for future use
-        if extracted_data and len(records) >= 1:
+        # Generate and cache regex patterns for future use AND use regex results as output
+        field_regexes = {}
+        if len(records) >= 1:
             _log_event(task_id, "schema_generating_regex", field_count=len(schema_fields))
-            
-            field_regexes = {}
             for field, examples in field_examples.items():
                 if examples:
                     regex_result = _generate_field_regex(field, examples, html_content, llm)
                     if regex_result and regex_result.get("regex"):
                         field_regexes[field] = regex_result
                         _log_event(task_id, "schema_field_regex_generated", field=field)
-            
-            # If we generated regexes, cache them
-            if field_regexes:
-                # Create a combined regex pattern that captures all fields
-                # Store as a special format: JSON with field->regex mapping
-                combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
-                
-                try:
-                    db_utils.record_new_parser(
-                        db,
-                        task_id=task_id,
-                        url=url,
-                        intent={"keywords": schema_fields, "schema_fields": schema_fields},
-                        pattern=f"(?s:SCHEMA:{combined_pattern})",  # Special prefix to identify schema regex
-                        flags="s",
-                        matches_count=len(extracted_data),
-                        source_type="SCHEMA",
-                        sample_input=html_content[:2000],
-                        sample_output=[{"text": d["text"]} for d in extracted_data[:5]]
-                    )
-                    _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
-                except Exception as e:
-                    logger.warning(f"Failed to cache schema regex: {e}")
-        
-        if extracted_data:
-            _log_event(task_id, "schema_extraction_success", record_count=len(extracted_data))
-        
-        return extracted_data, False  # Not from cache - newly extracted
-            
-    except Exception as e:
-        _log_event(task_id, "schema_extraction_failed", error=str(e))
-        logger.exception("Schema extraction failed")
-    
-    return [], False
 
+        if not field_regexes:
+            _log_event(task_id, "schema_extraction_failed", error="regex_generation_failed")
+            return [], False
+
+        # Apply generated regexes to produce final extraction (regex-only)
+        field_matches: Dict[str, List[str]] = {}
+        for field, regex_info in field_regexes.items():
+            pattern = regex_info.get("regex", "")
+            flags = regex_info.get("flags", "s")
+            if pattern:
+                matches = _apply_regex_matches(pattern, flags, html_content)
+                if matches:
+                    cleaned = []
+                    for m in matches:
+                        clean = _strip_html_to_text(m) if _looks_like_html(m) else m
+                        if clean:
+                            cleaned.append(clean)
+                    if cleaned:
+                        field_matches[field] = cleaned
+
+        if not field_matches:
+            _log_event(task_id, "schema_extraction_failed", error="regex_no_matches")
+            return [], False
+
+        max_len = max(len(v) for v in field_matches.values())
+        extracted_via_regex: List[Dict[str, Any]] = []
+        for i in range(max_len):
+            record = {}
+            for field, values in field_matches.items():
+                if i < len(values):
+                    record[field] = values[i]
+            if record:
+                text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
+                extracted_via_regex.append(
+                    {"text": text_repr, "fields": record, "source": "schema_regex", "confidence": 0.9}
+                )
+
+        if not extracted_via_regex:
+            _log_event(task_id, "schema_extraction_failed", error="regex_combination_empty")
+            return [], False
+
+        # Cache the combined regexes
+        combined_pattern = _json.dumps({"schema_fields": schema_fields, "field_regexes": field_regexes})
+        try:
+            db_utils.record_new_parser(
+                db,
+                task_id=task_id,
+                url=url,
+                intent={"keywords": schema_fields, "schema_fields": schema_fields},
+                pattern=f"(?s:SCHEMA:{combined_pattern})",
+                flags="s",
+                matches_count=len(extracted_via_regex),
+                source_type="SCHEMA",
+                sample_input=html_content[:2000],
+                sample_output=[{"text": d["text"]} for d in extracted_via_regex[:5]],
+            )
+            _log_event(task_id, "schema_regex_cached", fields=list(field_regexes.keys()))
+        except Exception as e:
+            logger.warning(f"Failed to cache schema regex: {e}")
+
+        _log_event(task_id, "schema_extraction_success", record_count=len(extracted_via_regex))
+        return extracted_via_regex, False  # Not from cache - newly extracted
 
 def _run_schema_extraction(
     task_id: str, schema_fields: List[str], inner_text: str, html_content: str, llm: LLMClient
@@ -1204,23 +1254,6 @@ def _run_single_field_extraction(
                 _log_event(task_id, "regex_success", pattern=pattern[:100], match_count=len(unique_matches))
     else:
         _log_event(task_id, "regex_generation_failed", error=gen.get("error"), attempts=len(gen.get("attempts", [])))
-        
-        # FALLBACK: If regex generation failed but we found examples in the content,
-        # use the LLM-identified examples directly since they were verified to exist
-        # Use ANY match (not ALL) since long text examples might be truncated
-        if example_texts:
-            found_examples = []
-            for ex in example_texts:
-                # For multi-line examples, check if first line is in content
-                if ex in search_content:
-                    found_examples.append(ex)
-                elif '\n' in ex:
-                    first_line = ex.split('\n')[0].strip()
-                    if first_line and len(first_line) > 5 and first_line in search_content:
-                        found_examples.append(ex)  # Keep full example text
-            if found_examples:
-                _log_event(task_id, "fallback_to_llm_examples", count=len(found_examples))
-                extracted_data = [{"text": ex, "source": "llm_examples", "confidence": 0.8} for ex in found_examples]
     
     return extracted_data
 
