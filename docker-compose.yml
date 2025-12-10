@@ -72,7 +72,7 @@ services:
   headless_worker:
     build:
       context: .
-      dockerfile: services/headless-worker/Dockerfile
+      dockerfile: services/headless_worker/Dockerfile
     container_name: diploma_headless_worker
     env_file:
       - .env
