@@ -15,7 +15,8 @@ from .prompts import (
 )
 from .utils import (
     log_event, decompose_stored_regex, apply_regex_matches, 
-    strip_html_to_text, looks_like_html, extract_snippet
+    strip_html_to_text, looks_like_html, extract_snippet,
+    convert_html_to_markdown_like
 )
 from .llm_ops import (
     find_structured_examples_via_llm, find_matching_text_via_llm,
@@ -102,20 +103,225 @@ def steps3_4_find_and_select_snippet(
     
     return {"snippet": best_snippet, "micro_snippets": micro_snippets}
 
+def _get_matches_with_positions(pattern: str, flags: str, content: str) -> List[tuple]:
+    """Get regex matches with their start positions in content."""
+    re_flags = 0
+    for f in flags:
+        if f == 'i':
+            re_flags |= re.IGNORECASE
+        elif f == 'm':
+            re_flags |= re.MULTILINE
+        elif f == 's':
+            re_flags |= re.DOTALL
+    
+    matches_with_pos = []
+    try:
+        compiled = re.compile(pattern, re_flags)
+        for m in compiled.finditer(content):
+            # Get the captured group if it exists, else full match
+            text = m.group(1) if m.lastindex and m.lastindex >= 1 else m.group(0)
+            text = text.strip()
+            if text:
+                matches_with_pos.append((text, m.start()))
+    except re.error:
+        pass
+    return matches_with_pos
+
+
+def _group_matches_by_position(
+    field_matches: Dict[str, List[tuple]], 
+    required_fields: List[str],
+    proximity_threshold: int = 2000
+) -> List[Dict[str, Any]]:
+    """
+    Group field matches by their position in the source.
+    Matches within proximity_threshold chars of each other are considered part of the same record.
+    Missing fields are filled with None.
+    """
+    if not field_matches:
+        return []
+    
+    # Get all positions from all fields to find record boundaries
+    all_positions = []
+    for field, matches in field_matches.items():
+        for text, pos in matches:
+            all_positions.append((pos, field, text))
+    
+    if not all_positions:
+        return []
+    
+    # Sort by position
+    all_positions.sort(key=lambda x: x[0])
+    
+    # Group matches that appear close together
+    records = []
+    current_record: Dict[str, Any] = {}
+    current_start = all_positions[0][0]
+    
+    for pos, field, text in all_positions:
+        # If this match is far from current record start, finalize current and start new
+        if pos - current_start > proximity_threshold and current_record:
+            # Fill missing fields with None
+            complete_record = {f: current_record.get(f) for f in required_fields}
+            # Only keep records that have at least one non-None value
+            if any(v is not None for v in complete_record.values()):
+                records.append(complete_record)
+            current_record = {}
+            current_start = pos
+        
+        # Add to current record (first value for each field wins)
+        if field not in current_record:
+            current_record[field] = text
+            # Update start position if this is the first field in a new record
+            if len(current_record) == 1:
+                current_start = pos
+    
+    # Don't forget the last record
+    if current_record:
+        complete_record = {f: current_record.get(f) for f in required_fields}
+        if any(v is not None for v in complete_record.values()):
+            records.append(complete_record)
+    
+    return records
+
+
+def _find_example_in_content(example: str, content: str) -> int:
+    """
+    Find an example in content using multiple strategies.
+    Returns the position or -1 if not found.
+    """
+    if not example:
+        return -1
+    
+    # Strategy 1: Exact match
+    idx = content.find(example)
+    if idx != -1:
+        return idx
+    
+    # Strategy 2: Case-insensitive
+    idx = content.lower().find(example.lower())
+    if idx != -1:
+        return idx
+    
+    # Strategy 3: Normalize whitespace and try again
+    normalized_ex = ' '.join(example.split())
+    idx = content.find(normalized_ex)
+    if idx != -1:
+        return idx
+    idx = content.lower().find(normalized_ex.lower())
+    if idx != -1:
+        return idx
+    
+    # Strategy 4: Try matching just the core numeric/alpha content for salaries/prices
+    # e.g., "1960-2500" from "1960-2500 €/mon. Gross"
+    if re.search(r'\d', example):
+        # Extract numeric patterns - try range first (most specific)
+        range_match = re.search(r'(\d+)\s*[-–]\s*(\d+)', example)
+        if range_match:
+            range_pattern = range_match.group(1) + r'\s*[-–]\s*' + range_match.group(2)
+            match = re.search(range_pattern, content)
+            if match:
+                return match.start()
+        
+        # Then try individual numbers
+        numbers = re.findall(r'\d+', example)
+        for num in numbers:
+            if len(num) >= 4:  # Only use if significant (4+ digits like salaries)
+                idx = content.find(num)
+                if idx != -1:
+                    return idx
+    
+    # Strategy 5: Try first significant chunk (for job titles, etc.)
+    # Handle special quotes that might differ
+    if len(example) > 15:
+        # Try progressively smaller chunks
+        for chunk_len in [40, 25, 15]:
+            if len(example) >= chunk_len:
+                chunk = example[:chunk_len]
+                idx = content.lower().find(chunk.lower())
+                if idx != -1:
+                    return idx
+    
+    # Strategy 6: For company names, try without special quote characters
+    # Lithuanian uses „ and " but HTML might have different encoding
+    if '„' in example or '"' in example or '"' in example:
+        # Replace all quote variants with a common one and search
+        normalized = example.replace('„', '"').replace('"', '"').replace('"', '"')
+        idx = content.find(normalized)
+        if idx != -1:
+            return idx
+        # Also try stripping quotes entirely and matching the core text
+        core = re.sub(r'[„"""]', '', example).strip()
+        if len(core) > 5:
+            idx = content.find(core)
+            if idx != -1:
+                return idx
+    
+    return -1
+
+
 def run_multi_field_extraction(
     task_id: str, keywords: List[str], example_texts: List[str],
     search_content: str, snippet_to_use: str, llm: LLMClient
 ) -> List[Dict[str, Any]]:
-    """Generate separate regex for each field and combine results."""
+    """Generate separate regex for each field and combine results by position."""
     log_event(task_id, "multi_field_extraction", fields=keywords)
-    field_results = {}
+    
+    # Store matches with positions for each field
+    field_matches: Dict[str, List[tuple]] = {}
+    
+    # PHASE 1: Collect snippets for ALL fields first
+    # This allows us to use snippets from one field for another when needed
+    all_field_snippets: Dict[str, List[str]] = {}
+    all_field_examples: Dict[str, List[str]] = {}
     
     for field in keywords:
         field_examples = extract_field_examples(example_texts, field)
         if not field_examples:
+            log_event(task_id, "field_no_examples", field=field)
             continue
         
+        all_field_examples[field] = field_examples
         log_event(task_id, "field_examples", field=field, examples=field_examples)
+        
+        # Find focused snippets around where these examples actually appear in HTML
+        field_snippets = []
+        for ex in field_examples[:3]:
+            if not ex:
+                continue
+            # Use robust search that handles encoding/whitespace issues
+            idx = _find_example_in_content(ex, search_content)
+            if idx != -1:
+                # Extract snippet around this location (500 chars each side)
+                start = max(0, idx - 500)
+                end = min(len(search_content), idx + len(ex) + 500)
+                snippet = search_content[start:end]
+                field_snippets.append(snippet)
+                log_event(task_id, "field_snippet_found", field=field, example=ex[:30], snippet_len=len(snippet))
+        
+        all_field_snippets[field] = field_snippets
+    
+    # Build a fallback snippet from any field that has snippets
+    # (since they all come from the same HTML structure)
+    fallback_snippets = []
+    for field, snippets in all_field_snippets.items():
+        if snippets:
+            fallback_snippets.extend(snippets[:2])
+    combined_fallback = "\n...\n".join(fallback_snippets[:4]) if fallback_snippets else snippet_to_use
+    
+    # PHASE 2: Generate regex for each field using collected snippets
+    for field in keywords:
+        field_examples = all_field_examples.get(field, [])
+        if not field_examples:
+            continue
+        
+        # Use field's own snippets if available, otherwise use fallback from other fields
+        field_snippets = all_field_snippets.get(field, [])
+        if field_snippets:
+            combined_snippet = "\n...\n".join(field_snippets[:3])
+        else:
+            log_event(task_id, "field_using_cross_field_snippets", field=field)
+            combined_snippet = combined_fallback
         
         gen = regex_generation.iterative_regex_generation(
             source=search_content,
@@ -123,38 +329,56 @@ def run_multi_field_extraction(
             target_desc=f"{field} values",
             llm=llm,
             max_iterations=2,
-            snippet=snippet_to_use
+            snippet=combined_snippet
         )
         
         if gen.get("success"):
             pattern = gen.get("final_pattern")
             flags = gen.get("final_flags", "s")
-            matches = apply_regex_matches(pattern, flags, search_content)
-            if matches:
-                unique = list(dict.fromkeys(matches))
-                field_results[field] = unique
-                log_event(task_id, "field_regex_success", field=field, match_count=len(unique))
+            matches_with_pos = _get_matches_with_positions(pattern, flags, search_content)
+            if matches_with_pos:
+                # Deduplicate while preserving first occurrence position
+                seen = set()
+                unique_matches = []
+                for text, pos in matches_with_pos:
+                    if text not in seen:
+                        seen.add(text)
+                        unique_matches.append((text, pos))
+                field_matches[field] = unique_matches
+                log_event(task_id, "field_regex_success", field=field, match_count=len(unique_matches))
             else:
                 log_event(task_id, "field_regex_no_matches", field=field, pattern=pattern)
         else:
-            log_event(task_id, "field_regex_failed", field=field, error=gen.get("error"))
+            # Extract failure details from attempts
+            attempts = gen.get("attempts", [])
+            last_issues = []
+            last_pattern = None
+            if attempts:
+                last_attempt = attempts[-1]
+                validation = last_attempt.get("validation", {})
+                last_issues = validation.get("issues", [])
+                last_pattern = validation.get("pattern")
+            log_event(task_id, "field_regex_failed", field=field, 
+                      error=gen.get("error"), issues=last_issues, pattern=last_pattern)
     
-    # Combine field results into records
+    # Group matches by position - only records with ALL fields
+    grouped_records = _group_matches_by_position(field_matches, keywords)
+    log_event(task_id, "position_grouping", 
+              total_fields=len(field_matches), 
+              complete_records=len(grouped_records))
+    
+    # Convert to output format
     extracted_data = []
-    if field_results:
-        max_len = max(len(v) for v in field_results.values())
-        for i in range(max_len):
-            record = {field: values[i] for field, values in field_results.items() if i < len(values)}
-            if record:
-                text_repr = " | ".join(f"{k}: {v}" for k, v in record.items())
-                extracted_data.append({
-                    "text": text_repr,
-                    "fields": record,
-                    "source": "multi_field_regex",
-                    "confidence": 0.85
-                })
-        log_event(task_id, "multi_field_success", record_count=len(extracted_data))
+    for record in grouped_records:
+        text_repr = " | ".join(f"{k}: {v}" for k, v in record.items())
+        extracted_data.append({
+            "text": text_repr,
+            "fields": record,
+            "source": "multi_field_regex",
+            "confidence": 0.85
+        })
     
+    log_event(task_id, "multi_field_success", record_count=len(extracted_data))
     return extracted_data
 
 def run_schema_extraction_with_cache(
@@ -232,10 +456,13 @@ def run_schema_extraction_with_cache(
     log_event(task_id, "schema_cache_miss", generating_new=True)
     
     # No cache hit - use LLM extraction
+    # Use markdown-like text to preserve links for the LLM
+    content_for_llm = convert_html_to_markdown_like(html_content[:50000]) if html_content else inner_text[:15000]
+    
     fields_list = ", ".join(schema_fields)
     prompt = SCHEMA_EXTRACTION_USER_TEMPLATE.format(
         fields_list=fields_list,
-        content_snippet=inner_text[:15000]
+        content_snippet=content_for_llm
     )
 
     messages = [
@@ -317,14 +544,8 @@ def run_schema_extraction_with_cache(
             if field in record and record[field]:
                 field_examples[field].append(str(record[field]))
         
-        for field in schema_fields:
-            if 'url' in field.lower() and (not record.get(field) or record.get(field) == ""):
-                apply_pattern = r'href=["\']([^"\']*(?:apply|career|job)[^"\']*)["\']'
-                apply_matches = re.findall(apply_pattern, html_content, re.IGNORECASE)
-                if apply_matches:
-                    full_urls = [u for u in apply_matches if u.startswith('http')]
-                    record[field] = full_urls[0] if full_urls else apply_matches[0]
-
+        # Removed heuristic URL fallback as we now provide links to LLM directly
+        
         if "image_url" in schema_fields and record.get("image_url"):
             field_examples["image_url"].append(str(record["image_url"]))
         

@@ -109,12 +109,40 @@ def extract_field_examples(example_texts: List[str], field: str) -> List[str]:
     for ex in example_texts:
         found = False
         
-        # Try JSON extraction first (handles {"id": 123, ...} format)
+        # Try parsing as dict (JSON or Python repr)
+        try:
+            stripped = ex.strip()
+            if stripped.startswith('{') and stripped.endswith('}'):
+                import ast
+                # Use literal_eval for safety (handles python dict syntax with single quotes)
+                data = ast.literal_eval(stripped)
+                if isinstance(data, dict):
+                    # Try exact match, lower match, or partial match
+                    val = data.get(field) or data.get(field_lower)
+                    if not val:
+                        # Try finding key case-insensitively
+                        for k, v in data.items():
+                            if k.lower() == field_lower:
+                                val = v
+                                break
+                    
+                    if val:
+                        field_examples.append(str(val))
+                        found = True
+                        continue
+        except Exception:
+            pass
+
+        if found:
+            continue
+
+        # Try regex extraction (handles {"id": 123, ...} format if eval failed)
+        # Updated to handle single or double quotes
         json_patterns = [
-            rf'"{field_lower}"\s*:\s*"([^"]*)"',  # String value: "field": "value"
-            rf'"{field_lower}"\s*:\s*(\d+)',       # Number value: "field": 123
-            rf'"{field}"\s*:\s*"([^"]*)"',         # Exact field name string
-            rf'"{field}"\s*:\s*(\d+)',             # Exact field name number
+            rf'["\']{field_lower}["\']\s*:\s*["\']([^"\']*)["\']',  # String value: "field": "value" or 'field': 'value'
+            rf'["\']{field_lower}["\']\s*:\s*(\d+)',       # Number value: "field": 123
+            rf'["\']{field}["\']\s*:\s*["\']([^"\']*)["\']',         # Exact field name string
+            rf'["\']{field}["\']\s*:\s*(\d+)',             # Exact field name number
         ]
         
         for pattern in json_patterns:
@@ -144,13 +172,8 @@ def extract_field_examples(example_texts: List[str], field: str) -> List[str]:
                     found = True
                 break
         
-        # If field is about names/entities and not found, assume first line is the entity name
-        if not found and lines:
-            name_keywords = ['name', 'title', 'country', 'city', 'company', 'product', 'item']
-            if any(kw in field_lower for kw in name_keywords):
-                first_line = lines[0].strip()
-                if first_line and ':' not in first_line:
-                    field_examples.append(first_line)
+        # REMOVED: Aggressive heuristic that assumed first line = entity name
+        # This caused job_title to be extracted as company name when format was unclear
     
     return list(dict.fromkeys(field_examples))[:3]  # Dedupe and limit
 

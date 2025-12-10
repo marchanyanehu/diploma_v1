@@ -160,6 +160,7 @@ def find_structured_examples_via_llm(text: str, target: str, keywords: List[str]
     
     try:
         resp = llm.generate_text(prompt, extra_params={"response_format": {"type": "json_object"}})
+        logger.info(f"LLM structured examples raw response: {resp[:500]}")
         data = json.loads(resp)
         
         examples = []
@@ -168,10 +169,17 @@ def find_structured_examples_via_llm(text: str, target: str, keywords: List[str]
         elif isinstance(data, dict):
             for k, v in data.items():
                 if isinstance(v, list):
-                    examples = [str(x) for x in v if x]
+                    # If items are dicts, convert them to string representations
+                    formatted = []
+                    for item in v:
+                        if isinstance(item, dict):
+                            formatted.append(json.dumps(item))
+                        else:
+                            formatted.append(str(item))
+                    examples = formatted
                     break
         
-        logger.info(f"LLM found {len(examples)} structured examples for '{target}': {[e[:50] for e in examples[:2]]}")
+        logger.info(f"LLM found {len(examples)} structured examples for '{target}': {[e[:80] for e in examples[:3]]}")
         return examples
         
     except Exception as e:

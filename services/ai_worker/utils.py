@@ -63,3 +63,38 @@ def extract_micro_snippet(content: str, idx: int, example_len: int, context: int
     s_start = max(0, idx - context)
     s_end = min(len(content), idx + example_len + context)
     return content[s_start:s_end]
+
+def convert_html_to_markdown_like(html: str) -> str:
+    """Convert HTML to text but preserve links in Markdown format [text](url)."""
+    # 1. Extract links: <a ... href="url" ...>text</a> -> [text](url)
+    
+    def replace_link(match):
+        attrs = match.group(1)
+        text = match.group(2)
+        
+        # Find href in attributes
+        href_match = re.search(r'href=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        if href_match:
+            url = href_match.group(1)
+            # Clean text (remove internal tags)
+            clean_text = re.sub(r'<[^>]+>', '', text).strip()
+            if not clean_text:
+                clean_text = "link"
+            return f" [{clean_text}]({url}) "
+        return text
+
+    # Match <a attributes>content</a>
+    # Non-greedy match for content
+    text = re.sub(r'<a([^>]+)>(.*?)</a>', replace_link, html, flags=re.IGNORECASE | re.DOTALL)
+    
+    # 2. Strip remaining HTML tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+    
+    # 3. Decode entities
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    
+    # 4. Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+

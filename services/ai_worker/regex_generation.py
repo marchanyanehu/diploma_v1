@@ -407,6 +407,17 @@ def iterative_regex_generation(
              val["success"] = True
              val["issues"] = [] # Clear issues since mismatch is expected
     
+    # For multi-field extraction, relax validation if we got reasonable matches
+    # The examples might contain unicode/special chars that don't match exactly
+    if not is_attribute_extraction and val["matches"] and not val.get("error"):
+        # Check if we got reasonable number of matches (at least as many as examples)
+        if len(val["matches"]) >= len(examples):
+            # Only fail if pattern is clearly too generic (high duplication)
+            dup_issues = [i for i in val.get("issues", []) if "duplication" in i.lower()]
+            if not dup_issues:
+                val["success"] = True
+                val["issues"] = [i for i in val.get("issues", []) if "missing" not in i.lower()]
+    
     attempts.append({"stage": "initial", "raw": raw, "parsed": parsed, "validation": val})
     if val.get("success"):
         return {

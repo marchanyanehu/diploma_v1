@@ -279,13 +279,16 @@ CONTENT:
 # Structured Examples (Specific to tasks.py _find_structured_examples_via_llm)
 # ---------------------------------------------------------------------------
 
-FIND_STRUCTURED_EXAMPLES_USER_TEMPLATE = """I need to extract structured records containing: {fields_str}
-Find 2-3 COMPLETE example records from the text below.
-Each record should include ALL the fields mentioned above.
-Return the EXACT text as it appears, preserving line breaks within each record.
+FIND_STRUCTURED_EXAMPLES_USER_TEMPLATE = """I need to extract structured records containing these fields: {fields_str}
 
-Return ONLY a JSON object: {{"examples": ["record1 text", "record2 text"]}}
-If no complete records found, return {{"examples": []}}.
+Find 2-3 COMPLETE example records from the text below.
+Each record MUST be a JSON object with ALL the fields mentioned above as keys.
+
+Return ONLY a JSON object in this EXACT format:
+{{"examples": [{{"field1": "value1", "field2": "value2"}}, {{"field1": "value3", "field2": "value4"}}]}}
+
+CRITICAL: Each example MUST be a JSON object with the field names as keys, NOT plain text.
+If a field value is not found, use empty string for that field.
 
 CONTENT:
 {snippet}"""
