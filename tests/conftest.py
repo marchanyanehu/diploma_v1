@@ -15,19 +15,24 @@ if str(REPO_ROOT) not in sys.path:
 
 from services.api.main import app, get_db
 from services.api.database import Base
-from services.api import auth, db_utils
+from services.api import auth, db_utils, db_models
 
-# In-memory DB for testing
-SQLALCHEMY_DATABASE_URL = "sqlite://"
+# Use file-based DB for debugging
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test_debug.db"
+
+if os.path.exists("./test_debug.db"):
+    os.remove("./test_debug.db")
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def override_get_db():
+    print(f"DEBUG: override_get_db called. Engine: {engine.url}")
     try:
         db = TestingSessionLocal()
         yield db
@@ -39,6 +44,7 @@ app.dependency_overrides[get_db] = override_get_db
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI application."""
+    print(f"DEBUG: Creating tables. Tables found: {list(Base.metadata.tables.keys())}")
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as c:
         yield c
@@ -52,12 +58,36 @@ def auth_client(client):
     try:
         # Check if user exists first (tests share state sometimes if not properly torn down)
         if not db_utils.get_user_by_username(db, "testuser"):
-            hashed_password = auth.get_password_hash("testpass")
+            # Manually instantiate AuthService to avoid Depends() error
+            user_repo = auth.SqlAlchemyUserRepository(db)
+            auth_service = auth.AuthService(
+                secret_key=auth.SECRET_KEY,
+                algorithm=auth.ALGORITHM,
+                access_token_expire_minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES,
+                user_repo=user_repo
+            )
+            hashed_password = auth_service.hash_password("testpass")
             db_utils.create_user(db, "testuser", hashed_password, "test@example.com")
     finally:
         db.close()
-    
+
     # Get token
-    token = auth.create_access_token(data={"sub": "testuser"})
+    # Re-instantiate AuthService for token creation (needs no DB session for encoding)
+    # We can pass a dummy repo or None if we trust it doesn't use it for encoding
+    # But AuthService.__init__ requires user_repo.
+    # Let's just use a fresh session/repo.
+    db = TestingSessionLocal()
+    try:
+        user_repo = auth.SqlAlchemyUserRepository(db)
+        auth_service = auth.AuthService(
+            secret_key=auth.SECRET_KEY,
+            algorithm=auth.ALGORITHM,
+            access_token_expire_minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES,
+            user_repo=user_repo
+        )
+        token = auth_service.create_access_token(username="testuser")
+    finally:
+        db.close()
+
     client.headers.update({"Authorization": f"Bearer {token}"})
     return client

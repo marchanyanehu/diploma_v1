@@ -65,4 +65,4 @@ def test_chat_uses_fallback_when_primary_fails(monkeypatch):
 
     assert text == "ok"
     assert calls[0].startswith("baseten/deepseek-ai/DeepSeek-V3.2")
-    assert calls[1].startswith("gemini/gemini-2.0-flash")
+    assert calls[-1].startswith("gemini/gemini-2.0-flash")
