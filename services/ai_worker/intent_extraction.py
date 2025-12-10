@@ -22,7 +22,7 @@ Environment overrides:
   INTENT_MODEL (default: value from LLM_MODEL or fallback)
 
 Usage:
-  from shared.intent_extraction import extract_intent
+  from services.ai_worker.intent_extraction import extract_intent
   intent = extract_intent("i want to have jobs scraped here for remote python roles in europe")
 """
 from __future__ import annotations
@@ -33,8 +33,8 @@ import re
 import logging
 from typing import Any, Dict, List, Optional
 
-from .llm_client import LLMClient
-from shared.prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_TEMPLATE
+from shared.llm_client import LLMClient
+from .prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_TEMPLATE
 
 logger = logging.getLogger(__name__)
 

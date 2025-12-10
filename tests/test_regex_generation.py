@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict
 
-from shared import regex_generation as rg
+from services.ai_worker import regex_generation as rg
 
 
 class DummyLLM:

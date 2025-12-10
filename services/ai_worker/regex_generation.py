@@ -62,7 +62,7 @@ __all__ = [
 ]
 
 
-from shared.prompts import (
+from .prompts import (
     REGEX_GENERATION_SYSTEM_PROMPT,
     REGEX_GENERATION_RULES,
     REGEX_GENERATION_ATTRIBUTE_USER_TEMPLATE,

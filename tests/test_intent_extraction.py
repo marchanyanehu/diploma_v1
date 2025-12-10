@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from shared.intent_extraction import extract_intent
+from services.ai_worker.intent_extraction import extract_intent
 
 
 class DummyLLM:

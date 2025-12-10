@@ -1,7 +1,7 @@
 """Tests for Task #405 snippet extraction utility."""
 from __future__ import annotations
 
-from shared.snippet_extractor import extract_snippet_around_example
+from services.ai_worker.snippet_extractor import extract_snippet_around_example
 
 
 SAMPLE_SOURCE = (

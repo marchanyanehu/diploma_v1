@@ -11,14 +11,14 @@ from urllib.parse import urlparse
 from shared.celery_app import celery_app
 from services.api.database import SessionLocal
 from services.api import db_utils
-from shared.intent_extraction import extract_intent
+from .intent_extraction import extract_intent
 from shared.input_sanitization import sanitize_user_input, InputSanitizationError
 from shared.example_finder import find_target_examples
-from shared.snippet_extractor import extract_snippet_around_example
-from shared import regex_generation
+from .snippet_extractor import extract_snippet_around_example
+from . import regex_generation
 from shared.llm_client import LLMClient
 from shared import metrics
-from shared.prompts import (
+from .prompts import (
     HTML_FIELD_REGEX_SYSTEM_PROMPT,
     HTML_FIELD_REGEX_USER_TEMPLATE,
     ATTRIBUTE_EXTRACTION_USER_TEMPLATE,
