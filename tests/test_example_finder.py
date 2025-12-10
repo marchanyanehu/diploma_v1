@@ -1,7 +1,7 @@
 """Tests for Task #403 example finder."""
 from __future__ import annotations
 
-from shared.example_finder import find_target_examples
+from services.ai_worker.example_finder import find_target_examples
 
 
 def test_find_target_examples_basic():

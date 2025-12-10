@@ -13,7 +13,7 @@ from services.api.database import SessionLocal
 from services.api import db_utils
 from .intent_extraction import extract_intent
 from shared.input_sanitization import sanitize_user_input, InputSanitizationError
-from shared.example_finder import find_target_examples
+from .example_finder import find_target_examples
 from .snippet_extractor import extract_snippet_around_example
 from . import regex_generation
 from shared.llm_client import LLMClient
