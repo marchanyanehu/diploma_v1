@@ -107,14 +107,19 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # 1. Check Cache
         cache_result = workflows.check_cached_parser(db, domain, keywords, search_content)
         if cache_result["matches"]:
-            extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
-            used_parser = cache_result["used_parser"]
-            used_cached = True
-            if used_parser:
-                try:
-                    db_utils.update_parser_usage(db, used_parser.id)
-                except Exception as e:
-                    utils.log_event(task_id, "update_parser_usage_failed", error=str(e))
+            # If schema extraction is requested, ensure we don't use a CONTENT parser
+            parser = cache_result["used_parser"]
+            if schema_fields and parser and parser.source_type != "SCHEMA":
+                utils.log_event(task_id, "cache_hit_ignored_type_mismatch", expected="SCHEMA", found=parser.source_type)
+            else:
+                extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
+                used_parser = parser
+                used_cached = True
+                if used_parser:
+                    try:
+                        db_utils.update_parser_usage(db, used_parser.id)
+                    except Exception as e:
+                        utils.log_event(task_id, "update_parser_usage_failed", error=str(e))
         
         # 2. Schema Extraction (if requested and no cache hit)
         if not extracted_data and schema_fields:

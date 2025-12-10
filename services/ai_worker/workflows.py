@@ -170,10 +170,62 @@ def run_schema_extraction_with_cache(
     for parser in cached_parsers:
         try:
             stored_regex = cast(str, parser.generated_regex)
-            if "SCHEMA:" in stored_regex:
-                log_event(task_id, "schema_cache_found_but_skipping", parser_id=parser.id,
-                           reason="per-field regex caching cannot maintain field associations")
-                continue
+            pattern, flags = decompose_stored_regex(stored_regex)
+            
+            # Unwrap potentially nested flags
+            while pattern.startswith("(?"):
+                pattern, _ = decompose_stored_regex(pattern)
+
+            if pattern.startswith("SCHEMA:"):
+                json_str = pattern[7:]
+                try:
+                    schema_data = json.loads(json_str)
+                    field_regexes = schema_data.get("field_regexes", {})
+                    
+                    # Apply regexes
+                    field_matches = {}
+                    match_counts = []
+                    
+                    for field, regex_info in field_regexes.items():
+                        r_pattern = regex_info.get("regex")
+                        r_flags = regex_info.get("flags", "s")
+                        matches = apply_regex_matches(r_pattern, r_flags, html_content)
+                        
+                        # Clean matches
+                        cleaned = []
+                        for m in matches:
+                            if looks_like_html(m):
+                                cleaned.append(strip_html_to_text(m))
+                            else:
+                                cleaned.append(m)
+                        
+                        field_matches[field] = cleaned
+                        match_counts.append(len(cleaned))
+                    
+                    # Check if counts align (simple heuristic for association)
+                    if match_counts and all(c == match_counts[0] for c in match_counts) and match_counts[0] > 0:
+                        count = match_counts[0]
+                        extracted = []
+                        for i in range(count):
+                            record = {}
+                            for field in field_regexes:
+                                record[field] = field_matches[field][i]
+                            
+                            text_repr = " | ".join(f"{k}: {v}" for k, v in record.items() if v)
+                            extracted.append({
+                                "text": text_repr,
+                                "fields": record,
+                                "source": "cached_schema_regex",
+                                "confidence": 1.0
+                            })
+                        
+                        log_event(task_id, "schema_cache_hit", parser_id=parser.id, count=len(extracted))
+                        return extracted, True
+                    else:
+                        log_event(task_id, "schema_cache_mismatch_counts", counts=match_counts)
+                        
+                except json.JSONDecodeError:
+                    pass
         except Exception as e:
             logger.warning(f"Failed to apply cached schema parser: {e}")
     
