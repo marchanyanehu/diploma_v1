@@ -57,7 +57,7 @@ Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
 -   **Dual Extraction Paths**: 
     - **Schema extraction**: Multi-field structured data (title + price + description) with proper field associations
     - **Single-field extraction**: Optimized pipeline with example finding and focused snippets
--   **Smart Caching**: Field-based regex cache with URL pattern matching - same cache across different prompts requesting the same fields
+-   **Smart Caching**: Field-based regex cache per complete URL - reuses patterns for same URL + field combinations
 -   **Token-Optimized AI**: LLM only sees 32KB snippets, regex runs on full content locally
 -   **Auto-Invalidating Cache**: Patterns automatically validated and removed when they fail
 -   **Automated Scheduling**: Cron-like schedules per user via `/api/v1/jobs`

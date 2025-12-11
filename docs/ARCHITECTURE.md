@@ -32,7 +32,7 @@ graph TD
     -   Captures `html` (full page structure) and network requests
     -   Semantic content provides cleaner signal for LLM analysis
 4.  **AI Analysis (AI Worker, `ai_queue`)**:
-    -   **Step 1**: Check field-based cache with URL pattern matching
+    -   **Step 1**: Check field-based cache with complete URL matching
     -   **Step 2**: If cache miss, determine extraction path:
     -   **Schema Extraction Path** (multi-field requests like "title, price, description"):
         - LLM extracts all fields with proper associations directly from semantic content
@@ -46,7 +46,7 @@ graph TD
         - Extract focused micro-snippets (150 chars) around examples
         - LLM generates RegEx using `services/ai_worker/regex_generation.py`
         - Iterative loop: Generate → Validate → Refine (up to 3 attempts)
-    -   **Cache**: Successful, validated regex stored by domain + URL pattern + fields for reuse.
+    -   **Cache**: Successful, validated regex stored by domain + complete URL + fields for reuse.
 5.  **Extraction**: Worker applies RegEx to full content (semantic for cached, full HTML for fresh regex).
 6.  **Result**: Structured data saved to DB with `source`, `confidence`, and `fields` metadata.
 

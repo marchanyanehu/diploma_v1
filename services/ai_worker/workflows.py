@@ -22,7 +22,7 @@ def check_cached_parser(
     db, domain: str, fields: List[str], search_content: str, 
     source_type: str = "SEMANTIC", min_matches: int = 1, url_pattern: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Check for and apply cached regex parser based on domain + URL pattern + fields.
+    """Check for and apply cached regex parser based on domain + complete URL + fields.
     
     Args:
         db: Database session
@@ -31,12 +31,12 @@ def check_cached_parser(
         search_content: Content to search (semantic text or HTML)
         source_type: Type of content ('SEMANTIC', 'HTML', 'JSON')
         min_matches: Minimum matches required to consider cache valid
-        url_pattern: URL pattern (e.g., 'amazon.com/books/*') for path-aware matching
+        url_pattern: Complete URL (e.g., 'https://puko.lt/category/robes') for precise matching
         
     Returns:
         Dict with used_parser, matches, and used_cached flag
     """
-    # Find cached parsers for this domain + URL pattern + field combination
+    # Find cached parsers for this domain + complete URL + field combination
     parsers = db_utils.find_cached_parser_by_fields(db, domain, fields, source_type, url_pattern=url_pattern)
     
     for p in parsers:

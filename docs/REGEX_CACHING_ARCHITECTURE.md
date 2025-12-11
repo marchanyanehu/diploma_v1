@@ -2,15 +2,15 @@
 
 ## Overview
 
-This document describes the field-based regex caching system with URL pattern matching that enables fast, reusable extraction patterns across similar web pages without requiring LLM calls.
+This document describes the field-based regex caching system with complete URL matching that enables fast, reusable extraction patterns for the exact same pages without requiring LLM calls.
 
 ## Key Features
 
-### 1. **Field-Based Indexing with URL Pattern Matching**
-- Cache indexed by: `domain + URL pattern + fields` (not full user prompt)
-- URL patterns enable path-aware caching (e.g., `amazon.com/books/*` vs `amazon.com/electronics/*`)
-- Same regex reused for different prompts if they extract the same fields from similar URLs
-- Example: "extract title and price" and "get all product names and costs" use same cache for same URL pattern
+### 1. **Field-Based Indexing with Complete URL Matching**
+- Cache indexed by: `domain + complete URL + fields` (not full user prompt)
+- Complete URL matching prevents overlaps with complex URL paths and query parameters
+- Same regex reused for different prompts if they extract the same fields from the exact same URL
+- Example: "extract title and price" and "get all product names and costs" use same cache for identical URL + fields
 
 ### 2. **Semantic Content Targeting**
 - Regex generated from **semantic content** (not HTML or JSON)
@@ -96,10 +96,11 @@ def check_cached_parser(
     min_matches: int = 1, url_pattern: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    - Queries by domain + URL pattern + fields (normalized, sorted)
+    - Queries by domain + complete URL + fields (normalized, sorted)
+    - url_pattern parameter contains the full URL for precise matching
     - Validates matches (count + field presence)
     - Auto-invalidates on failure
-    """
+    ""\
 ```
 
 ### 2. Cache Creation (`create_parser_cache_by_fields`)
@@ -142,9 +143,9 @@ def invalidate_parser(db: Session, parser_id: int) -> None:
 
 ### First Request (Cache Miss)
 ```
-User: "extract all product titles and prices from puko.lt/category/robes"
+User: "extract all product titles and prices from https://puko.lt/category/robes"
 ↓
-1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [title, price]
+1. Domain: puko.lt, URL: https://puko.lt/category/robes, Fields: [title, price]
 2. Check cache: NOT FOUND
 3. LLM extraction from semantic content:
    ## Халат Бамбоо весна
@@ -156,27 +157,37 @@ User: "extract all product titles and prices from puko.lt/category/robes"
    54.00€
 4. Generate regex from semantic markers:
    ## (?P<title>[^\n]+)\s+\[BUTTON: Add to Cart\]\s+(?P<price>\d+\.\d+€)
-5. Cache regex (domain=puko.lt, url_pattern=puko.lt/category/robes, fields=[price, title])
+5. Cache regex (domain=puko.lt, url=https://puko.lt/category/robes, fields=[price, title])
 6. Return 25 items
 ```
 
-### Second Request (Cache Hit)
+### Second Request (Cache Hit - Same URL)
 ```
-User: "show me all item names and costs from puko.lt/category/robes"
+User: "show me all item names and costs from https://puko.lt/category/robes"
 ↓
-1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [name, cost]
+1. Domain: puko.lt, URL: https://puko.lt/category/robes, Fields: [name, cost]
    (normalized to [cost, name] → matches [price, title])
-2. Check cache: FOUND! (parser_id=123, same URL pattern)
+2. Check cache: FOUND! (parser_id=123, exact URL + field match)
 3. Apply cached regex to semantic content
 4. Return 25 items (0.5ms vs 5000ms)
 5. Update parser usage stats
 ```
 
+### Cache Miss (Different URL Path)
+```
+User: "extract titles and prices from https://puko.lt/category/towels"
+↓
+1. Domain: puko.lt, URL: https://puko.lt/category/towels, Fields: [title, price]
+2. Check cache: NOT FOUND (different URL path - no pattern matching)
+3. LLM extraction for new page
+4. Generate and cache new regex for this specific URL
+```
+
 ### Cache Invalidation (Automatic)
 ```
-User: "extract titles and prices from puko.lt/category/robes" (page changed)
+User: "extract titles and prices from https://puko.lt/category/robes" (page changed)
 ↓
-1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [title, price]
+1. Domain: puko.lt, URL: https://puko.lt/category/robes, Fields: [title, price]
 2. Check cache: FOUND (parser_id=123)
 3. Apply regex → Only 2 matches (expected 25+)
 4. INVALID! Invalidate parser_id=123
