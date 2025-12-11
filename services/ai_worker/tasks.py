@@ -88,7 +88,10 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
             logger.warning(f"Failed to persist sources: {e}")
 
         llm = LLMClient.from_env()
-        domain = urlparse(url).netloc
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        # Use full URL as pattern for precise matching
+        url_pattern = url
         
         # Prepare content
         text_content = inner_text
@@ -103,21 +106,29 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         used_parser = None
         used_cached = False
         
-        # 1. Try cache first
-        cache_result = workflows.check_cached_parser(db, domain, keywords, search_content)
-        if cache_result["matches"]:
-            extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
-            used_parser = cache_result["used_parser"]
-            used_cached = True
-            utils.log_event(task_id, "cache_hit", count=len(extracted_data))
+        # Determine fields to extract (schema_fields or keywords)
+        extract_fields = schema_fields if schema_fields else keywords
+        
+        # 1. Try cache first (field-based caching for semantic content)
+        if extract_fields:
+            cache_result = workflows.check_cached_parser(
+                db, domain, extract_fields, inner_text, 
+                source_type="SEMANTIC", min_matches=1, url_pattern=url_pattern
+            )
+            if cache_result["matches"]:
+                extracted_data = cache_result["matches"]
+                used_parser = cache_result["used_parser"]
+                used_cached = True
+                utils.log_event(task_id, "cache_hit", count=len(extracted_data), fields=extract_fields)
         
         # 2. Try direct LLM extraction (simple and effective)
         if not extracted_data:
             if schema_fields:
-                # Schema-based extraction
+                # Schema-based extraction with regex caching
                 utils.log_event(task_id, "schema_extraction", fields=schema_fields)
                 extracted_data = workflows.run_schema_extraction(
-                    task_id, url, schema_fields, inner_text, html_content, llm
+                    task_id, url, schema_fields, inner_text, html_content, llm,
+                    db=db, domain=domain, url_pattern=url_pattern
                 )
             else:
                 # Field-based extraction
