@@ -13,14 +13,16 @@ from ..schemas import TaskStatus, TaskStatusResponse, ScrapeResult
 
 def normalize_status(task: ScrapingTask) -> TaskStatus:
     """Map raw DB status string to TaskStatus enum with safe fallback."""
-    raw_status = cast(str, getattr(task, "status", "") or "")
-    # Workers sometimes store STARTED; treat it as IN_PROGRESS for API contract
-    if raw_status.upper() == "STARTED":
+    raw_status = (cast(str, getattr(task, "status", "") or "")).upper()
+    # If data exists but status is failed, trust data (late-status write guard)
+    has_data = bool(getattr(task, "extracted_data", None))
+    if raw_status == "FAILED" and has_data:
+        return TaskStatus.SUCCESS
+    if raw_status == "STARTED":
         return TaskStatus.IN_PROGRESS
-    try:
-        return TaskStatus(raw_status)
-    except ValueError:
-        return TaskStatus.FAILED
+    if raw_status in ("PENDING", "IN_PROGRESS", "SUCCESS", "FAILED"):
+        return cast(TaskStatus, raw_status)
+    return TaskStatus.FAILED
 
 
 def extract_timestamps(task: ScrapingTask) -> tuple[datetime, datetime]:
@@ -42,12 +44,12 @@ def derive_progress(task: ScrapingTask, status_enum: TaskStatus) -> Optional[int
     Provide a lightweight progress hint derived from timestamps/status.
     Keeps API responses informative even without a dedicated progress column.
     """
-    if status_enum is TaskStatus.SUCCESS:
+    if status_enum == TaskStatus.SUCCESS:
         return 100
-    if status_enum is TaskStatus.FAILED:
+    if status_enum == TaskStatus.FAILED:
         # Failed but finished running
         return 100 if getattr(task, "completed_at", None) else 0
-    if status_enum is TaskStatus.IN_PROGRESS:
+    if status_enum == TaskStatus.IN_PROGRESS:
         return 50 if getattr(task, "started_at", None) else 10
     # Pending
     return 0
@@ -57,13 +59,13 @@ def derive_message(status_enum: TaskStatus, error_message: Optional[str]) -> Opt
     """Generate a user-friendly message when none is stored."""
     if error_message:
         return error_message
-    if status_enum is TaskStatus.SUCCESS:
+    if status_enum == TaskStatus.SUCCESS:
         return "Task completed successfully"
-    if status_enum is TaskStatus.IN_PROGRESS:
+    if status_enum == TaskStatus.IN_PROGRESS:
         return "Task is in progress"
-    if status_enum is TaskStatus.PENDING:
+    if status_enum == TaskStatus.PENDING:
         return "Task is pending in the queue"
-    if status_enum is TaskStatus.FAILED:
+    if status_enum == TaskStatus.FAILED:
         return "Task failed"
     return None
 

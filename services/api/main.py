@@ -605,7 +605,8 @@ async def get_task_result(
 
     if status_enum in {schemas.TaskStatus.PENDING, schemas.TaskStatus.IN_PROGRESS}:
         pending_payload = task_presenter.build_status_response(task)
-        return JSONResponse(status_code=202, content=pending_payload.model_dump())
+        # Ensure datetimes are JSON-serializable in the 202 payload
+        return JSONResponse(status_code=202, content=pending_payload.model_dump(mode="json"))
 
     if status_enum is schemas.TaskStatus.FAILED:
         err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
