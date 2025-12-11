@@ -16,12 +16,6 @@ def strip_html_to_text(html: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def looks_like_html(text: str) -> bool:
-    """Check if text contains significant HTML tags."""
-    # Count HTML tags
-    tag_count = len(re.findall(r'<[a-zA-Z][^>]*>', text))
-    return tag_count >= 2  # At least 2 tags suggests HTML content
-
 def decompose_stored_regex(stored: str) -> tuple[str, str]:
     m = re.match(r"\(\?([ims]+):(.*)\)$", stored)
     if m:

@@ -236,15 +236,6 @@ def persist_extraction_result(
 # record_new_parser removed - now using create_parser_cache_by_fields for field-based caching
 
 
-def get_all_tasks(db: Session, limit: int = 10) -> List[ScrapingTask]:
-    """Get recent scraping tasks."""
-    return (
-        db.query(ScrapingTask)
-        .order_by(ScrapingTask.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-
 def create_scheduled_job(
     db: Session,
     url: str,

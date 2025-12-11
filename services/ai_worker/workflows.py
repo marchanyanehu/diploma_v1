@@ -254,7 +254,7 @@ def _cache_regex_from_extraction(
 
 
 def run_field_extraction(
-    task_id: str, url: str, keywords: List[str],
+    task_id: str, keywords: List[str],
     inner_text: str, html_content: str, llm: LLMClient, db, domain: str,
     url_pattern: Optional[str] = None
 ) -> List[Dict[str, Any]]:
