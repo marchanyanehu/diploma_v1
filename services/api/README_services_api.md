@@ -33,13 +33,15 @@ services/api/
 
 shared/                  # Shared modules across services
 ├── celery_app.py        # Celery configuration
-├── llm_client.py        # LiteLLM wrapper (Gemini/OpenAI)
+├── llm_client.py        # LiteLLM wrapper (DeepSeek/Gemini/OpenAI)
+└── input_sanitization.py# Prompt injection protection
+
+services/ai_worker/      # AI worker service
 ├── intent_extraction.py # User prompt → structured intent
 ├── regex_generation.py  # Iterative regex generation
-├── snippet_extractor.py # Token-optimized content extraction
-├── example_finder.py    # Find examples in content
-├── input_sanitization.py# Prompt injection protection
-└── metrics.py           # Prometheus metrics
+├── workflows.py         # Schema extraction and caching
+├── tasks.py             # Celery tasks for AI processing
+└── utils.py             # Helper utilities
 
 tests/                   # All test files
 ├── test_api_*.py        # API endpoint tests

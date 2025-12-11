@@ -150,7 +150,7 @@ Generates regular expressions to extract structured data from HTML/JSON content 
 
 ### Location
 
-**Module**: `shared/regex_generation.py`
+**Module**: `services/ai_worker/regex_generation.py`
 
 **Key Functions**:
 - `build_generation_messages()` - Creates initial prompt for regex generation
@@ -158,7 +158,7 @@ Generates regular expressions to extract structured data from HTML/JSON content 
 - `validate_regex()` - Tests pattern against examples without LLM
 - `iterative_regex_generation()` - Main loop: Generate → Validate → Refine (up to 3 iterations)
 
-**Called From**: `services/ai_worker/tasks.py` in `_run_single_field_extraction()`
+**Called From**: `services/ai_worker/workflows.py` in `_cache_regex_from_extraction()` and single-field extraction paths
 
 ### Design Goals
 
@@ -173,23 +173,23 @@ Generates regular expressions to extract structured data from HTML/JSON content 
 The system **never sends full HTML to the LLM**. Instead, it extracts focused snippets:
 
 | Snippet Type | Size | Purpose |
-|--------------|------|---------|
-| Full content | Unlimited | Kept for regex application (pure Python, no LLM) |
-| LLM text prompt | 32KB max | Clean text sent to LLM for example finding |
+|--------------|------|---------|  
+| Semantic content (full) | Unlimited | Structured text with role markers for regex application |
+| Full HTML | Unlimited | Kept for regex application and snippet extraction |
+| LLM semantic prompt | 32KB max | Truncated semantic content for LLM extraction |
 | Attribute prompt | 15KB max | HTML snippets for URL/attribute extraction |
 | `extract_snippet_around_example()` | 600 chars default | Line-aware extraction preserving example intact |
 | `micro_snippet` | 150 chars | Focused HTML context for precise regex generation |
 | `best_snippet` | 4000 chars | Larger context as fallback |
 
 Execution model (current):
-- LLM is used to propose examples and generate regex.
-- **Schema extraction returns LLM-extracted data directly** with properly associated fields. Regex is generated and validated for caching purposes only.
-- Single-field extraction returns regex matches only. If regex generation or matching fails, the field is marked unavailable.
+- LLM is used to extract data and propose examples.
+- **Schema extraction returns LLM-extracted data directly** with properly associated fields (source: "schema_extraction").
+- Single-field extraction uses regex for matching. If regex generation or matching fails, returns LLM examples as fallback.
 - Regex patterns are **validated against LLM output** before caching - patterns must achieve ≥60% match rate.
+- Semantic content uses role markers: `[LINK: text]`, `[BUTTON: text]`, `##` headings, `•` lists, `|` tables for cleaner LLM prompts.
 
-This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page; regex runs locally on the full captured content.
-
-### System Prompt
+This architecture means **page size doesn't matter** - a 10MB page works just as well as a 10KB page; regex runs locally on the full captured content.### System Prompt
 
 ```text
 You are a specialized AI assistant that generates **generalized, production-grade regular expressions** from provided JSON or HTML snippets.

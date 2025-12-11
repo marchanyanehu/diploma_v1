@@ -44,10 +44,42 @@ Content-Type: application/json
   "url": "https://careers.example.com/jobs",
   "prompt": "I want all job titles and their locations",
   "data": [
-    {"text": "Senior Software Engineer — Berlin, Germany", "source": "generated_regex", "confidence": 0.9},
-    {"text": "Product Manager — London, UK", "source": "generated_regex", "confidence": 0.9},
-    {"text": "Data Scientist — New York, USA", "source": "generated_regex", "confidence": 0.9},
-    {"text": "DevOps Engineer — Remote", "source": "generated_regex", "confidence": 0.9}
+    {
+      "text": "title: Senior Software Engineer | location: Berlin, Germany",
+      "fields": {
+        "title": "Senior Software Engineer",
+        "location": "Berlin, Germany"
+      },
+      "source": "schema_extraction",
+      "confidence": 0.9
+    },
+    {
+      "text": "title: Product Manager | location: London, UK",
+      "fields": {
+        "title": "Product Manager",
+        "location": "London, UK"
+      },
+      "source": "schema_extraction",
+      "confidence": 0.9
+    },
+    {
+      "text": "title: Data Scientist | location: New York, USA",
+      "fields": {
+        "title": "Data Scientist",
+        "location": "New York, USA"
+      },
+      "source": "schema_extraction",
+      "confidence": 0.9
+    },
+    {
+      "text": "title: DevOps Engineer | location: Remote",
+      "fields": {
+        "title": "DevOps Engineer",
+        "location": "Remote"
+      },
+      "source": "schema_extraction",
+      "confidence": 0.9
+    }
   ],
   "metadata": {
     "total_matches": 4,

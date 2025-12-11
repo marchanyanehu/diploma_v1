@@ -26,43 +26,45 @@ graph TD
 ## Data Flow (Optimized Pipeline)
 
 1.  **Request**: User sends `url` + `prompt` to API.
-2.  **Intent Extraction**: AI Worker extracts target, keywords, and schema fields from prompt.
+2.  **Intent Extraction**: AI Worker extracts target, keywords, and schema_fields from prompt.
 3.  **Fetch**: Headless Worker (Celery `fetching_queue`) navigates to `url`.
-    -   Captures `inner_text` (visible, up to 1MB) and `html` (structure), plus network preview.
+    -   Captures **semantic content** (structured text with role markers: `[LINK:]`, `[BUTTON:]`, `##` headings, `•` lists, `|` tables)
+    -   Captures `html` (full page structure) and network requests
+    -   Semantic content provides cleaner signal for LLM analysis
 4.  **AI Analysis (AI Worker, `ai_queue`)**:
-    -   **Step 1**: Prepare content - truncate to 32KB for LLM, keep full for regex.
-    -   **Schema Extraction Path** (multi-field requests like "price, title, description"):
-        - LLM extracts all fields with proper associations directly
-        - Returns LLM-extracted data (source: "schema_llm")
-        - Generates per-field regexes and validates against LLM output
-        - Only caches regexes with ≥60% match rate
-    -   **Single-Field Extraction Path**:
-        - LLM finds *example values* in `inner_text` (e.g., specific prices/titles)
-        - Worker searches `html` for these examples (no LLM) to find *candidate snippets*
+    -   **Step 1**: Check field-based cache with URL pattern matching
+    -   **Step 2**: If cache miss, determine extraction path:
+    -   **Schema Extraction Path** (multi-field requests like "title, price, description"):
+        - LLM extracts all fields with proper associations directly from semantic content
+        - Returns structured data (source: "schema_extraction") with `fields` property
+        - Generates regex from semantic content and validates against LLM output
+        - Only caches regexes with ≥60% match rate to ensure quality
+    -   **Single-Field Extraction Path** (single keyword):
+        - LLM finds *example values* in semantic content (truncated to 32KB)
+        - Worker searches `html` for these examples to find *candidate snippets*
         - LLM selects best candidate from snippets (source disambiguation)
         - Extract focused micro-snippets (150 chars) around examples
-        - LLM generates RegEx using `shared/regex_generation.py`
+        - LLM generates RegEx using `services/ai_worker/regex_generation.py`
         - Iterative loop: Generate → Validate → Refine (up to 3 attempts)
-    -   **Cache**: Successful, validated regex stored per domain/keywords for reuse.
-5.  **Extraction**: Worker applies RegEx to full content (or uses cached parser).
-6.  **Result**: Structured data saved to DB with `source` and `confidence` metadata.
+    -   **Cache**: Successful, validated regex stored by domain + URL pattern + fields for reuse.
+5.  **Extraction**: Worker applies RegEx to full content (semantic for cached, full HTML for fresh regex).
+6.  **Result**: Structured data saved to DB with `source`, `confidence`, and `fields` metadata.
 
 ### Snippet Strategy (Token Optimization)
 
-The system never sends full HTML to the LLM. Instead, it uses focused snippets:
+The system never sends full HTML to the LLM. Instead, it uses semantic content and focused snippets:
 
 | Layer | Size | Purpose |
-|-------|------|---------|
-| Full content | Unlimited* | Stored for regex application (pure Python) |
-| LLM prompt content | 32KB max | Sent to LLM for example finding |
-| Attribute extraction | 15KB max | Sent to LLM for URL/attribute extraction |
+|-------|------|---------|  
+| Semantic content (full) | Unlimited* | Structured text with role markers for regex application |
+| Full HTML | Unlimited* | Stored for regex application and snippet extraction |
+| LLM semantic prompt | 32KB max | Truncated semantic content for LLM extraction |
+| Attribute extraction | 15KB max | HTML snippets for URL/attribute extraction |
 | Context snippet | 4000 chars | Fallback for regex generation |
 | Micro-snippet | 150 chars | Focused HTML for precise regex |
 | Line-aware snippet | 600 chars | Preserves example intact with context |
 
-*Defensive 1MB cap for database storage, but rarely reached in practice.
-
-## Database Schema
+*Defensive 200KB cap for database storage (per field), but rarely reached in practice.## Database Schema
 
 -   **Users**: Authentication info (username, hashed_password, email, is_active).
 -   **ScrapingTasks**: Tracks status, raw content, intent, and final results.

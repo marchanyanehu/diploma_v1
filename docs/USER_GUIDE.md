@@ -156,13 +156,12 @@ curl -X GET "http://localhost:8000/api/v1/result/a1b2c3d4-e5f6-7890-abcd-ef12345
 ### ✅ Good Prompts
 
 | Prompt | Why It Works |
-|--------|--------------|
-| "Extract all product prices" | Clear, specific target |
-| "Get job titles and their locations" | Multiple fields, well-defined |
+|--------|--------------|  
+| "Extract all product prices" | Clear, specific single field target |
+| "Get job titles and their locations" | Multiple fields, triggers schema extraction |
+| "Extract product name, price, and description" | Multi-field structured request with clear field names |
 | "Find all article links from the news section" | Includes context (section) |
-| "Extract country names with capital, population, and area" | Multi-field structured request |
-
-### ❌ Bad Prompts
+| "Extract country names with capital, population, and area" | Multi-field structured request |### ❌ Bad Prompts
 
 | Prompt | Problem |
 |--------|---------|
@@ -175,8 +174,9 @@ curl -X GET "http://localhost:8000/api/v1/result/a1b2c3d4-e5f6-7890-abcd-ef12345
 
 1. **Be specific**: "Get all product prices" is better than "get data"
 2. **Name the target type**: "job listings", "prices", "article links"
-3. **Mention multiple fields**: "job title, company, and location"
+3. **Use multiple fields for structured data**: "job title, company, and location" triggers schema extraction with proper field associations
 4. **Include context if needed**: "from the main table", "in the sidebar"
+5. **Multi-field extractions**: The system automatically detects when you want structured data (title + price + description) and uses schema extraction to keep fields properly grouped
 
 ---
 
@@ -217,8 +217,7 @@ curl -X GET "http://localhost:8000/api/v1/result/a1b2c3d4-e5f6-7890-abcd-ef12345
 |--------|---------|
 | `generated_regex` | New regex pattern was generated for this extraction |
 | `cached_regex` | Reused a previously generated regex (faster) |
-| `cached_schema_regex` | Reused cached multi-field regex patterns |
-| `schema_extraction` | LLM-based structured field extraction |
+| `schema_extraction` | LLM-based multi-field structured extraction with field associations |
 | `href_extraction` | Extracted URL from HTML href attributes |
 | `llm_examples` | Fallback: LLM-identified examples when regex failed |
 

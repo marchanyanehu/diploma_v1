@@ -1,12 +1,14 @@
 # Playwright Headless Worker
 
-This service fetches pages with Playwright and hands captured content to the AI pipeline.
+This service fetches pages with Playwright and extracts semantic content with role markers for the AI pipeline.
 
 Key points:
 
 - Runs Celery worker on `fetching_queue` (see `shared/celery_app.py`).
 - Tasks live in `services/headless_worker/tasks.py`.
-- Captures visible text, full HTML, and network events; then enqueues `scrape.process_content` to `ai_queue`.
+- Captures **semantic content** (structured text with role markers: `[LINK:]`, `[BUTTON:]`, `##` headings, `•` lists, `|` tables).
+- Captures full HTML and network events for complete context.
+- Enqueues `scrape.process_content` to `ai_queue` with both semantic and HTML content.
 - Base image: `mcr.microsoft.com/playwright/python` (browsers included).
 - Connects to Redis (broker/backend) and Postgres for task status updates.
 

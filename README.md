@@ -41,24 +41,31 @@ Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
 2. **Scheduler Service (`scheduler`)**
     - Celery Beat job that enqueues due schedules every minute
 3. **Headless Worker (`headless_worker`)**
-    - Playwright fetcher; captures visible text + full HTML and forwards to AI
+    - Playwright fetcher; captures semantic content (structured text with markers) + full HTML
+    - Uses smart content extraction with role markers: `[LINK: text]`, `[BUTTON: text]`, `##` headings, `•` lists, `|` tables
     - Runs on Celery `fetching_queue`
 4. **AI Worker (`ai_worker`)**
-    - Intent extraction + optimized regex pipeline
-    - Uses LLM (Gemini/OpenAI) for intent, snippet choice, regex generation
+    - Intent extraction + dual-path extraction pipeline (schema vs single-field)
+    - Uses LLM (DeepSeek/Gemini/OpenAI) for intent, extraction, and regex generation
+    - Field-based caching with URL pattern matching for fast reuse
     - Runs on Celery `ai_queue`
 
 ## Key Features
 
--   **Natural Language Interface**: "Get me all prices from this page."
--   **Token-Optimized AI**: Works on visible text, then focused HTML snippets to cut LLM cost.
--   **Regex + Cache**: Generated regex is cached per-domain/keywords for reuse.
--   **Automated Scheduling**: Cron-like schedules per user via `/api/v1/jobs`.
--   **Robust Fetching**: Playwright worker with retry/backoff knobs.
--   **Microservices**: Scalable and decoupled architecture.
--   **JWT Auth**: All task and schedule endpoints require Bearer tokens.
--   **Rate Limiting**: API endpoints are rate-limited to prevent abuse.
--   **Prompt Injection Protection**: User inputs are sanitized against malicious patterns.
+-   **Natural Language Interface**: "Get me all prices from this page." or "Extract product title, price, and description"
+-   **Semantic Content Extraction**: Structured text with role markers (`[LINK]`, `[BUTTON]`, `##` headings) for cleaner LLM prompts
+-   **Dual Extraction Paths**: 
+    - **Schema extraction**: Multi-field structured data (title + price + description) with proper field associations
+    - **Single-field extraction**: Optimized pipeline with example finding and focused snippets
+-   **Smart Caching**: Field-based regex cache with URL pattern matching - same cache across different prompts requesting the same fields
+-   **Token-Optimized AI**: LLM only sees 32KB snippets, regex runs on full content locally
+-   **Auto-Invalidating Cache**: Patterns automatically validated and removed when they fail
+-   **Automated Scheduling**: Cron-like schedules per user via `/api/v1/jobs`
+-   **Robust Fetching**: Playwright worker with retry/backoff and stealth features
+-   **Microservices**: Scalable and decoupled architecture
+-   **JWT Auth**: All task and schedule endpoints require Bearer tokens
+-   **Rate Limiting**: API endpoints are rate-limited to prevent abuse
+-   **Prompt Injection Protection**: User inputs are sanitized against malicious patterns
 
 ## Security Features
 
@@ -126,8 +133,12 @@ Once running, visit: `http://localhost:8000/docs`.
 -   Jobs enqueue tasks via Celery Beat every minute.
 
 ### Workers & Queues
--   **Headless Worker** (`fetching_queue`): Playwright fetch → sends `scrape.process_content`
--   **AI Worker** (`ai_queue`): Intent + regex pipeline; caches parsers
+-   **Headless Worker** (`fetching_queue`): Playwright fetch with semantic content extraction → sends `scrape.process_content`
+-   **AI Worker** (`ai_queue`): 
+    - Intent extraction (target, keywords, schema_fields)
+    - Schema extraction path for multi-field requests (returns LLM data with field associations)
+    - Single-field extraction path with example finding and regex generation
+    - Field-based caching with URL pattern matching
 -   **Scheduler**: Celery Beat task `scheduler.check_due_jobs`
 
 ## Development

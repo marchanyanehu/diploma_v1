@@ -2,20 +2,21 @@
 
 ## Overview
 
-This document describes the field-based regex caching system that enables fast, reusable extraction patterns across similar web pages without requiring LLM calls.
+This document describes the field-based regex caching system with URL pattern matching that enables fast, reusable extraction patterns across similar web pages without requiring LLM calls.
 
 ## Key Features
 
-### 1. **Field-Based Indexing**
-- Cache indexed by: `domain + fields` (not full user prompt)
-- Same regex reused for different prompts if they extract the same fields
-- Example: "extract title and price" and "get all product names and costs" use same cache
+### 1. **Field-Based Indexing with URL Pattern Matching**
+- Cache indexed by: `domain + URL pattern + fields` (not full user prompt)
+- URL patterns enable path-aware caching (e.g., `amazon.com/books/*` vs `amazon.com/electronics/*`)
+- Same regex reused for different prompts if they extract the same fields from similar URLs
+- Example: "extract title and price" and "get all product names and costs" use same cache for same URL pattern
 
 ### 2. **Semantic Content Targeting**
 - Regex generated from **semantic content** (not HTML or JSON)
-- Uses structural markers: `##` headings, `•` lists, `|` tables
+- Uses structural markers: `[LINK: text]`, `[BUTTON: text]`, `##` headings, `•` lists, `|` tables
 - Cleaner patterns, more robust to HTML structure changes
-- 2KB semantic text vs 200KB HTML = faster matching
+- Semantic content provides better signal-to-noise ratio for pattern matching
 
 ### 3. **Automatic Invalidation**
 - Cache entries validated on each use
@@ -91,10 +92,11 @@ last_used_at: TIMESTAMP  -- Last successful use
 ```python
 def check_cached_parser(
     db, domain: str, fields: List[str], 
-    search_content: str, source_type: str = "SEMANTIC"
+    search_content: str, source_type: str = "SEMANTIC",
+    min_matches: int = 1, url_pattern: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    - Queries by domain + fields (normalized, sorted)
+    - Queries by domain + URL pattern + fields (normalized, sorted)
     - Validates matches (count + field presence)
     - Auto-invalidates on failure
     """
@@ -140,29 +142,31 @@ def invalidate_parser(db: Session, parser_id: int) -> None:
 
 ### First Request (Cache Miss)
 ```
-User: "extract all product titles and prices from puko.lt"
+User: "extract all product titles and prices from puko.lt/category/robes"
 ↓
-1. Domain: puko.lt, Fields: [title, price]
+1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [title, price]
 2. Check cache: NOT FOUND
 3. LLM extraction from semantic content:
    ## Халат Бамбоо весна
+   [BUTTON: Add to Cart]
    75.00€
    
    ## Халат Бамбоо Копи
+   [BUTTON: Add to Cart]
    54.00€
-4. Generate regex:
-   ## (?P<title>[^\n]+)\s+(?P<price>\d+\.\d+€)
-5. Cache regex (domain=puko.lt, fields=[price, title])
+4. Generate regex from semantic markers:
+   ## (?P<title>[^\n]+)\s+\[BUTTON: Add to Cart\]\s+(?P<price>\d+\.\d+€)
+5. Cache regex (domain=puko.lt, url_pattern=puko.lt/category/robes, fields=[price, title])
 6. Return 25 items
 ```
 
 ### Second Request (Cache Hit)
 ```
-User: "show me all item names and costs from puko.lt"
+User: "show me all item names and costs from puko.lt/category/robes"
 ↓
-1. Domain: puko.lt, Fields: [name, cost]
+1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [name, cost]
    (normalized to [cost, name] → matches [price, title])
-2. Check cache: FOUND! (parser_id=123)
+2. Check cache: FOUND! (parser_id=123, same URL pattern)
 3. Apply cached regex to semantic content
 4. Return 25 items (0.5ms vs 5000ms)
 5. Update parser usage stats
@@ -170,9 +174,9 @@ User: "show me all item names and costs from puko.lt"
 
 ### Cache Invalidation (Automatic)
 ```
-User: "extract titles and prices from puko.lt" (page changed)
+User: "extract titles and prices from puko.lt/category/robes" (page changed)
 ↓
-1. Domain: puko.lt, Fields: [title, price]
+1. Domain: puko.lt, URL pattern: puko.lt/category/robes, Fields: [title, price]
 2. Check cache: FOUND (parser_id=123)
 3. Apply regex → Only 2 matches (expected 25+)
 4. INVALID! Invalidate parser_id=123
