@@ -18,23 +18,26 @@ This is the main API service for the Intelligent Web Data Aggregator project. It
 services/api/
 ├── main.py              # FastAPI app, routes, rate limiting
 ├── auth.py              # JWT authentication helpers
-├── config.py            # Settings loader (env/.env)
-├── database.py          # Session & engine
-├── db_models.py         # ORM models (User, ScrapingTask, ParserCache, ScheduledJob)
-├── db_service.py        # Database service layer
-├── db_utils.py          # Database utilities
-├── models.py            # Pydantic request/response schemas
+├── config.py            # DEPRECATED: Re-exports from shared.config
+├── models.py            # DEPRECATED: Re-exports from shared.schemas
 ├── repositories.py      # DB repositories
-├── services/            # task_service, auth_service
+├── services/            # task_service, auth_service, task_presenter
 ├── logging_config.py    # Structured logging
 ├── error_handlers.py    # Custom error responses
 ├── Dockerfile           # API container build
 └── requirements.txt     # Python dependencies
 
-shared/                  # Shared modules across services
+shared/                  # Shared infrastructure across all services
+├── config.py            # Settings loader (env/.env) - used by all services
+├── schemas.py           # Pydantic request/response schemas (API contracts)
 ├── celery_app.py        # Celery configuration
 ├── llm_client.py        # LiteLLM wrapper (DeepSeek/Gemini/OpenAI)
-└── input_sanitization.py# Prompt injection protection
+├── input_sanitization.py# Prompt injection protection
+└── database/            # Database layer (shared across services)
+    ├── __init__.py      # Exports all DB components
+    ├── connection.py    # Session & engine management
+    ├── models.py        # ORM models (User, ScrapingTask, ParserCache, etc.)
+    └── utils.py         # Database CRUD operations
 
 services/ai_worker/      # AI worker service
 ├── intent_extraction.py # User prompt → structured intent
@@ -116,6 +119,18 @@ tests/                   # All test files
 - `DELETE /api/v1/jobs/{job_id}` - Delete job
 
 Background work is dispatched via Celery to `headless_worker` (fetching_queue) and `ai_worker` (ai_queue). See `shared/celery_app.py`, `services/headless_worker/tasks.py`, and `services/ai_worker/tasks.py`.
+
+## Module Organization
+
+The project follows microservices principles with shared infrastructure:
+
+- **`shared/config.py`**: Application settings used by all services (database, Redis, LLM, security)
+- **`shared/schemas.py`**: Pydantic API contracts shared between services
+- **`shared/database/`**: Database layer accessible to all services (connection, models, utilities)
+- **`services/api/config.py`**: Backward-compatible stub (re-exports from `shared.config`)
+- **`services/api/models.py`**: Backward-compatible stub (re-exports from `shared.schemas`)
+
+New code should import from `shared.*` modules directly.
 
 ## Security
 

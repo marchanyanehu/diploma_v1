@@ -32,23 +32,34 @@ A microservice-based web scraping system powered by LLMs to intelligently extrac
 
 ## Architecture
 
-Microservice layout (see `docs/ARCHITECTURE.md` for the diagram):
+Microservice layout with shared infrastructure (see `docs/ARCHITECTURE.md` for detailed diagram):
 
-1. **API Service (`api`)**
+### Services
+
+1. **API Service (`services/api/`)**
     - JWT auth (`/auth/register`, `/auth/token`)
     - Creates scraping tasks and exposes status/result endpoints
     - Manages user-owned schedules (CRUD on `/api/v1/jobs`)
-2. **Scheduler Service (`scheduler`)**
+2. **Scheduler Service (`services/scheduler/`)**
     - Celery Beat job that enqueues due schedules every minute
-3. **Headless Worker (`headless_worker`)**
+3. **Headless Worker (`services/headless_worker/`)**
     - Playwright fetcher; captures semantic content (structured text with markers) + full HTML
     - Uses smart content extraction with role markers: `[LINK: text]`, `[BUTTON: text]`, `##` headings, `•` lists, `|` tables
     - Runs on Celery `fetching_queue`
-4. **AI Worker (`ai_worker`)**
+4. **AI Worker (`services/ai_worker/`)**
     - Intent extraction + dual-path extraction pipeline (schema vs single-field)
     - Uses LLM (DeepSeek/Gemini/OpenAI) for intent, extraction, and regex generation
-    - Field-based caching with URL pattern matching for fast reuse
+    - Field-based caching with complete URL matching for fast reuse
     - Runs on Celery `ai_queue`
+
+### Shared Infrastructure (`shared/`)
+
+- **`config.py`**: Application settings (database, Redis, LLM, security) used by all services
+- **`schemas.py`**: Pydantic API contracts (request/response models)
+- **`database/`**: Database layer (connection, ORM models, CRUD utilities) shared across services
+- **`celery_app.py`**: Celery configuration and task queues
+- **`llm_client.py`**: LLM abstraction layer (DeepSeek via Baseten, Gemini, OpenAI)
+- **`input_sanitization.py`**: Prompt injection protection
 
 ## Key Features
 

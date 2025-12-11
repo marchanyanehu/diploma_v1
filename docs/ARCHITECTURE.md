@@ -64,7 +64,38 @@ The system never sends full HTML to the LLM. Instead, it uses semantic content a
 | Micro-snippet | 150 chars | Focused HTML for precise regex |
 | Line-aware snippet | 600 chars | Preserves example intact with context |
 
-*Defensive 200KB cap for database storage (per field), but rarely reached in practice.## Database Schema
+*Defensive 200KB cap for database storage (per field), but rarely reached in practice.## Module Organization
+
+The system follows microservices architecture with shared infrastructure:
+
+### Shared Modules (`shared/`)
+
+Shared across all services to prevent duplication:
+
+| Module | Purpose | Used By |
+|--------|---------|--------|
+| **config.py** | Application settings (DB, Redis, LLM, security) | All services, tests, migrations |
+| **schemas.py** | Pydantic API contracts (request/response models) | API service, tests |
+| **database/** | Database layer (connection, models, utilities) | All services, tests, migrations |
+| **celery_app.py** | Celery configuration and task queues | All workers, scheduler |
+| **llm_client.py** | LLM abstraction (DeepSeek/Gemini/OpenAI) | AI worker |
+| **input_sanitization.py** | Prompt injection protection | API service |
+
+### Database Module (`shared/database/`)
+
+- **`connection.py`**: SQLAlchemy engine, session management, `get_db()` dependency
+- **`models.py`**: ORM models (User, ScrapingTask, ScheduledJob, ParserCache, etc.)
+- **`utils.py`**: CRUD operations (create_task, get_task, cache lookups, etc.)
+- **`__init__.py`**: Central export point for all database components
+
+### Service-Specific Modules
+
+- **`services/api/`**: FastAPI routes, auth, repositories, service layer
+- **`services/ai_worker/`**: Intent extraction, regex generation, caching workflows
+- **`services/headless_worker/`**: Playwright fetching, semantic content extraction
+- **`services/scheduler/`**: Celery Beat scheduled job processing
+
+## Database Schema
 
 -   **Users**: Authentication info (username, hashed_password, email, is_active).
 -   **ScrapingTasks**: Tracks status, raw content, intent, and final results.
