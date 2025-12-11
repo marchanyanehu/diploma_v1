@@ -46,18 +46,6 @@ def log_event(task_id: str, event: str, **fields) -> None:
     except Exception:
         logger.info("%s %s", event, fields)
 
-def extract_snippet(content: str, idx: int, example_len: int, context: int = 1000) -> str:
-    """Extract a snippet from content around a given index with enough context."""
-    s_start = max(0, idx - context)
-    s_end = min(len(content), idx + example_len + context)
-    return content[s_start:s_end]
-
-def extract_micro_snippet(content: str, idx: int, example_len: int, context: int = 150) -> str:
-    """Extract a tiny snippet for debugging - just immediate HTML around example."""
-    s_start = max(0, idx - context)
-    s_end = min(len(content), idx + example_len + context)
-    return content[s_start:s_end]
-
 def convert_html_to_markdown_like(html: str) -> str:
     """Convert HTML to text but preserve links in Markdown format [text](url)."""
     # 1. Extract links: <a ... href="url" ...>text</a> -> [text](url)
