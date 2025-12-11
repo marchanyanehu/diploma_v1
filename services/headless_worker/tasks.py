@@ -90,8 +90,16 @@ async def _extract_semantic_content(page: Page) -> str:
             else if (tag === 'img') {
                 const alt = el.getAttribute('alt') || '';
                 const title = el.getAttribute('title') || '';
-                if (alt) text = `[IMAGE: ${alt}]`;
-                else if (title) text = `[IMAGE: ${title}]`;
+                // Prefer lazy-loading attributes for real URL
+                const dataSrc = el.getAttribute('data-src') || el.getAttribute('data-original') || '';
+                const srcset = el.getAttribute('srcset') || '';
+                const src = dataSrc || el.getAttribute('src') || (srcset.split(',')[0]?.trim().split(' ')[0]) || '';
+                const label = alt || title || 'image';
+                if (src) {
+                    text = `[IMAGE: ${label}] (${src})`;
+                } else if (label) {
+                    text = `[IMAGE: ${label}]`;
+                }
             }
             // Input fields
             else if (tag === 'input') {
@@ -327,6 +335,34 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, str, list[dict[
             
             # Extract semantic content (text + interactive elements)
             semantic_text = await _extract_semantic_content(page)
+
+            # Collect image sources explicitly to ensure URLs are present
+            try:
+                image_meta = await page.evaluate(
+                    """() => {
+                        return Array.from(document.images || []).map(img => {
+                            const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-original') || '';
+                            const srcset = img.getAttribute('srcset') || '';
+                            const srcsetFirst = srcset ? srcset.split(',')[0].trim().split(' ')[0] : '';
+                            const src = dataSrc || srcsetFirst || img.currentSrc || img.src || '';
+                            const alt = img.getAttribute('alt') || img.getAttribute('title') || '';
+                            return { src, alt };
+                        }).filter(x => x.src);
+                    }"""
+                )
+            except Exception:
+                image_meta = []
+
+            if image_meta:
+                image_lines = []
+                for img in image_meta[:200]:  # defensive cap
+                    src = img.get("src") or ""
+                    alt = img.get("alt") or "image"
+                    if not src:
+                        continue
+                    image_lines.append(f"[IMAGE: {alt}] ({src})")
+                if image_lines:
+                    semantic_text = f"{semantic_text}\n" + "\n".join(image_lines)
             
         except Exception as e:
             logger.error(f"Playwright navigation error: {e}")

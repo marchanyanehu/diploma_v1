@@ -71,6 +71,27 @@ def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
     finally:
         db.close()
 
+# TODO: add a unifier call to llm to prevent any hardcoded logic
+def _normalize_fields(fields: List[str]) -> List[str]:
+    """Normalize field names to improve LLM consistency (e.g., image_url)."""
+    normalized = []
+    for f in fields:
+        if not f:
+            continue
+        low = f.strip().lower().replace("-", " ").replace(".", " ")
+        low = "_".join(low.split())
+        if "image" in low and "url" in low:
+            low = "image_url"
+        elif "image" in low:
+            low = "image"
+        elif "price" in low:
+            low = "price"
+        elif "item" in low or "product" in low:
+            low = "item"
+        normalized.append(low)
+    return list(dict.fromkeys(normalized))  # keep order, dedupe
+
+
 @celery_app.task(name="scrape.process_content")
 def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_content: str, network: List, duration: int, started_iso: str, completed_iso: str):
     """Process fetched content: Universal Regex Pipeline for any content type."""
@@ -95,8 +116,8 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         url_pattern = url
         
         # Determine extraction mode
-        keywords = intent.get("keywords", [])
-        schema_fields = intent.get("schema_fields", [])
+        keywords = _normalize_fields(intent.get("keywords", []))
+        schema_fields = _normalize_fields(intent.get("schema_fields", []))
         
         extracted_data = []
         used_parser = None

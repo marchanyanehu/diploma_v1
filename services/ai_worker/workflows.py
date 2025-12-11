@@ -12,8 +12,11 @@ from .prompts import (
     SCHEMA_EXTRACTION_USER_TEMPLATE,
 )
 from .utils import (
-    log_event, decompose_stored_regex, apply_regex_matches, 
-    strip_html_to_text
+    log_event,
+    decompose_stored_regex,
+    apply_regex_matches,
+    strip_html_to_text,
+    convert_html_to_markdown_like,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,9 +86,18 @@ def run_schema_extraction(
     3. If cache miss: LLM extraction → generate regex → cache it
     4. If cache invalid: remove + regenerate
     """
-    # Prefer clean inner_text for structured extraction (better signal-to-noise)
-    # HTML contains too much layout markup that confuses the LLM
-    content = inner_text if inner_text and len(inner_text) > 500 else html_content
+    # Prefer HTML when image-like fields are requested so src/srcset are available
+    needs_media = any("image" in f.lower() or "img" in f.lower() for f in schema_fields)
+    if needs_media and html_content:
+        # Convert HTML to markdown-like text to expose src/srcset to the LLM
+        markdown_view = convert_html_to_markdown_like(html_content)
+        # Combine markdown view (with image URLs) and semantic text to maximize signals
+        combined = f"{markdown_view}\n\nSEMANTIC:\n{inner_text or ''}"
+        content = combined
+    else:
+        # Prefer clean inner_text for structured extraction (better signal-to-noise)
+        # HTML contains too much layout markup that can confuse the LLM
+        content = inner_text if inner_text and len(inner_text) > 500 else html_content
     content_snippet = content[:150000]  # Limit for LLM - increased to capture more items
     
     fields_list = ", ".join(schema_fields)

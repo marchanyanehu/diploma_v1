@@ -47,36 +47,50 @@ def log_event(task_id: str, event: str, **fields) -> None:
         logger.info("%s %s", event, fields)
 
 def convert_html_to_markdown_like(html: str) -> str:
-    """Convert HTML to text but preserve links in Markdown format [text](url)."""
-    # 1. Extract links: <a ... href="url" ...>text</a> -> [text](url)
-    
+    """Convert HTML to text but preserve links and images in Markdown format."""
     def replace_link(match):
         attrs = match.group(1)
         text = match.group(2)
-        
-        # Find href in attributes
         href_match = re.search(r'href=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
         if href_match:
             url = href_match.group(1)
-            # Clean text (remove internal tags)
-            clean_text = re.sub(r'<[^>]+>', '', text).strip()
-            if not clean_text:
-                clean_text = "link"
+            clean_text = re.sub(r'<[^>]+>', '', text).strip() or "link"
             return f" [{clean_text}]({url}) "
         return text
 
-    # Match <a attributes>content</a>
-    # Non-greedy match for content
+    def replace_image(match):
+        attrs = match.group(1)
+        # Prefer lazy-loading attributes first, then srcset, then src
+        src_match = (
+            re.search(r'data-src=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            or re.search(r'data-original=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            or None
+        )
+        if not src_match:
+            srcset_match = re.search(r'srcset=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            if srcset_match:
+                # srcset format: "url1 1x, url2 2x" -> take first URL token
+                first_src = srcset_match.group(1).split(",")[0].strip().split(" ")[0]
+                src_match = re.match(r".*", first_src)
+        if not src_match:
+            src_match = re.search(r'src=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+
+        alt_match = re.search(r'alt=["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+        src = src_match.group(1) if src_match else ""
+        alt = alt_match.group(1) if alt_match else "image"
+        if not src:
+            return ""
+        return f" ![{alt}]({src}) "
+
+    # Preserve anchors
     text = re.sub(r'<a([^>]+)>(.*?)</a>', replace_link, html, flags=re.IGNORECASE | re.DOTALL)
-    
-    # 2. Strip remaining HTML tags
+    # Preserve images
+    text = re.sub(r'<img([^>]+)>', replace_image, text, flags=re.IGNORECASE | re.DOTALL)
+    # Strip remaining tags
     text = re.sub(r'<[^>]+>', ' ', text)
-    
-    # 3. Decode entities
+    # Decode entities
     text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-    
-    # 4. Normalize whitespace
+    # Normalize whitespace
     text = re.sub(r'\s+', ' ', text).strip()
-    
     return text
 

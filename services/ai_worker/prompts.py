@@ -129,8 +129,10 @@ CRITICAL INSTRUCTIONS:
 3. Extract EVERY SINGLE product you can find - aim for 20-30+ items if they exist
 4. Do NOT stop after finding just a few items - scroll through all the content
 5. Extract EXACT text values as they appear (titles, prices, etc.)
-6. If a field is empty/missing for an item, use ""
-7. Skip navigation menus, headers, footers, sidebars - focus ONLY on product listings
+6. Field names must match EXACTLY: {fields_list}. Do not invent new names.
+7. For image_url: use the URL from <img> src/srcset/data-src/data-original OR markdown tokens like [IMAGE: ...](URL); keep full absolute URL (no truncation). NEVER use product detail page links as image_url.
+8. If a field is empty/missing for an item, use ""
+9. Skip navigation menus, headers, footers, sidebars - focus ONLY on product listings
 
 Output format - JSON with "items" array containing ALL products:
 {{"items": [
