@@ -5,11 +5,9 @@ These schemas define the API contracts used across services.
 Shared between API service and any clients/workers that interact with the API.
 """
 
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-
-
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -17,13 +15,12 @@ class UserCreate(BaseModel):
 
 
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     username: str
     email: Optional[str] = None
     is_active: bool
-
-    class Config:
-        from_attributes = True
 
 
 class Token(BaseModel):
@@ -83,6 +80,8 @@ class ScheduledJobCreate(BaseModel):
 
 
 class ScheduledJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     url: str
     prompt: str
@@ -90,6 +89,3 @@ class ScheduledJobResponse(BaseModel):
     next_run_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True

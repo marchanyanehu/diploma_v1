@@ -95,3 +95,17 @@ def auth_client(client):
 
     client.headers.update({"Authorization": f"Bearer {token}"})
     return client
+
+
+@pytest.fixture(scope="session", autouse=True)
+def suppress_litellm_logging_errors():
+    """Suppress litellm async cleanup logging errors at test teardown."""
+    import logging
+    import warnings
+    
+    # Filter out the specific logging error from litellm cleanup
+    warnings.filterwarnings("ignore", message=".*Using proactor.*")
+    
+    # Suppress asyncio event loop warnings during cleanup
+    logging.getLogger("asyncio").setLevel(logging.ERROR)
+    yield
