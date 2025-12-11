@@ -34,4 +34,4 @@ ENV REDIS_URL=redis://redis:6379/0 \
     CELERY_RESULT_BACKEND=redis://redis:6379/0
 
 # Start Celery worker
-CMD ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "default"]
+CMD ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "fetching_queue"]

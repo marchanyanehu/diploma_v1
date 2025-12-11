@@ -30,6 +30,14 @@ A microservice-based web scraping system powered by LLMs to intelligently extrac
 -   ⚠️ [System Limitations](docs/SYSTEM_LIMITATIONS.md) - What the system cannot do
 -   💬 [Example Dialogs](docs/EXAMPLE_DIALOGS.md) - 15+ usage examples and test scenarios
 
+## Containerization (minimum compliance)
+
+- Images: API / AI Worker / Scheduler on `python:3.11-slim` (multi-stage, non-root, healthcheck); Headless Worker on `mcr.microsoft.com/playwright/python:v1.44.0-jammy` (non-root `pwuser`, healthcheck). API exposes `8000`.
+- Compose: `docker-compose up --build` spins up Postgres, Redis, API, AI Worker (`ai_queue`), Headless Worker (`fetching_queue`), Scheduler (Celery Beat); `depends_on` uses healthchecks; shared network `diploma_network`; volumes `postgres_data`, `redis_data`; headless uses `shm_size: 1gb`.
+- Environment: copy `.env.example` → `.env`. Key vars: `POSTGRES_*`, `DB_*`, `REDIS_URL`/`CELERY_*`, `SECRET_KEY`, `LLM_PROVIDER`/`LLM_MODEL` + `LLM_FALLBACK_*`, API keys (`BASETEN_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`), Playwright tuning (`PLAYWRIGHT_HEADLESS`, timeouts/retries/locale/tz).
+- Resource hints: min 2 vCPU / 4 GB RAM; add +1 GB for Playwright chromium (shm already set to 1GB).
+- Diagrams: container layout and flows shown in `docs/ARCHITECTURE.md` (deployment diagram + API contracts).
+
 ## Architecture
 
 Microservice layout with shared infrastructure (see `docs/ARCHITECTURE.md` for detailed diagram):
