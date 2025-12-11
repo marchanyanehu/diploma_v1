@@ -26,7 +26,7 @@ services/api/
 ├── logging_config.py    # Structured logging
 ├── error_handlers.py    # Custom error responses
 ├── Dockerfile           # API container build
-└── requirements.txt     # Python dependencies
+└── requirements.txt     # Python dependencies (now at repo root)
 
 shared/                  # Shared infrastructure across all services
 ├── config.py            # Settings loader (env/.env) - used by all services
@@ -58,9 +58,8 @@ tests/                   # All test files
 
 ### Local Development
 
-1. **Install Dependencies**:
+1. **Install Dependencies** (from repo root):
    ```bash
-   cd services/api
    pip install -r requirements.txt
    ```
 
@@ -188,7 +187,7 @@ Run the test suite:
 
 ```bash
 # Install test dependencies (included in requirements.txt)
-pip install pytest pytest-asyncio pytest-cov
+pip install -r requirements.txt
 
 # Run tests
 pytest

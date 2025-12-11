@@ -9,8 +9,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Workdir
 WORKDIR /app
 
-# Install project requirements (reuse API requirements to keep deps in sync)
-COPY services/api/requirements.txt /tmp/requirements.txt
+# Install project requirements (shared root requirements)
+COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt \
     # Ensure playwright python package is present (base image usually has it)

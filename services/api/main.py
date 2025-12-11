@@ -28,19 +28,7 @@ from shared.database import get_db, create_tables, ScrapingTask, ParserCache, Us
 from shared.config import settings
 from .logging_config import setup_logging
 from .error_handlers import register_error_handlers
-from .schemas import (
-    ScrapeRequest,
-    TaskResponse,
-    TaskStatus,
-    TaskStatusResponse,
-    ScrapeResult,
-    ErrorResponse,
-    UserCreate,
-    Token,
-    UserResponse,
-    ScheduledJobCreate,
-    ScheduledJobResponse,
-)
+from . import schemas
 from . import auth
 from shared.celery_app import celery_app
 from .services.task_service import (
@@ -264,11 +252,11 @@ async def api_health_check(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 # --- Auth Endpoints ---
 
-@app.post("/auth/register", response_model=UserResponse, tags=["Auth"])
+@app.post("/auth/register", response_model=schemas.UserResponse, tags=["Auth"])
 @limiter.limit("5/minute")  # Limit registration attempts
 def register(
     request: Request,
-    user: UserCreate,
+    user: schemas.UserCreate,
     user_repo: UserRepository = Depends(get_user_repo),
     auth_service: auth.AuthService = Depends(auth.get_auth_service),
 ):
@@ -281,7 +269,7 @@ def register(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return user_repo.create(username=user.username, password_hash=hashed_password, email=user.email)
 
-@app.post("/auth/token", response_model=Token, tags=["Auth"])
+@app.post("/auth/token", response_model=schemas.Token, tags=["Auth"])
 @limiter.limit("10/minute")  # Limit login attempts to prevent brute force
 async def login_for_access_token(
     request: Request,
@@ -302,15 +290,15 @@ async def login_for_access_token(
 
 # --- Scheduler Endpoints ---
 
-@app.post("/api/v1/jobs", response_model=ScheduledJobResponse, tags=["Scheduler", "API v1"])
+@app.post("/api/v1/jobs", response_model=schemas.ScheduledJobResponse, tags=["Scheduler", "API v1"])
 def create_job(
-    job: ScheduledJobCreate,
+    job: schemas.ScheduledJobCreate,
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
     current_user: User = Depends(auth.get_current_user),
 ):
     return schedule_repo.create(str(job.url), job.prompt, job.schedule_cron, current_user.id)
 
-@app.get("/api/v1/jobs", response_model=List[ScheduledJobResponse], tags=["Scheduler", "API v1"])
+@app.get("/api/v1/jobs", response_model=List[schemas.ScheduledJobResponse], tags=["Scheduler", "API v1"])
 def list_jobs(
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
     current_user: User = Depends(auth.get_current_user),
@@ -332,7 +320,7 @@ def delete_job(
 
 @app.post(
     "/api/v1/process",
-    response_model=TaskResponse,
+    response_model=schemas.TaskResponse,
     status_code=202,
     tags=["API v1"],
     summary="Create a scraping task",
@@ -355,7 +343,7 @@ def delete_job(
             },
         },
         400: {
-            "model": ErrorResponse,
+            "model": schemas.ErrorResponse,
             "description": "Validation error in the request body",
             "content": {
                 "application/json": {
@@ -374,11 +362,11 @@ def delete_job(
 @limiter.limit("10/minute")  # Limit scraping requests to prevent abuse
 async def process_request(
     request: Request,
-    scrape_request: ScrapeRequest,
+    scrape_request: schemas.ScrapeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
     task_service: TaskService = Depends(get_task_service),
-) -> TaskResponse:
+) -> schemas.TaskResponse:
     """
     Create a new scraping task for the provided URL and prompt.
 
@@ -403,9 +391,9 @@ async def process_request(
         extra={"url": str(scrape_request.url), "user": current_user.username},
     )
     task_id = task_service.create_task(str(scrape_request.url), sanitized_prompt, current_user.id)
-    resp = TaskResponse(
+    resp = schemas.TaskResponse(
         task_id=task_id,
-        status=TaskStatus.PENDING,
+        status=schemas.TaskStatus.PENDING,
         message="Task created successfully",
     )
     logger.info("api.process_request.accepted", extra={"task_id": task_id})
@@ -414,7 +402,7 @@ async def process_request(
 
 @app.get(
     "/api/v1/status/{task_id}",
-    response_model=TaskStatusResponse,
+    response_model=schemas.TaskStatusResponse,
     tags=["API v1"],
     summary="Get task status",
     description=(
@@ -438,7 +426,7 @@ async def process_request(
             },
         },
         404: {
-            "model": ErrorResponse,
+            "model": schemas.ErrorResponse,
             "description": "Task not found",
             "content": {
                 "application/json": {
@@ -458,7 +446,7 @@ async def get_task_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
     task_service: TaskService = Depends(get_task_service),
-) -> TaskStatusResponse:
+) -> schemas.TaskStatusResponse:
     """
     Retrieve the current status for a scraping task by its task_id.
 
@@ -481,7 +469,7 @@ async def get_task_status(
 
 @app.get(
     "/api/v1/result/{task_id}",
-    response_model=ScrapeResult,
+    response_model=schemas.ScrapeResult,
     tags=["API v1"],
     summary="Get final result for a completed task",
     description=(
@@ -509,7 +497,7 @@ async def get_task_status(
             },
         },
         202: {
-            "model": TaskStatusResponse,
+            "model": schemas.TaskStatusResponse,
             "description": "Task not completed yet",
             "content": {
                 "application/json": {
@@ -525,7 +513,7 @@ async def get_task_status(
             },
         },
         400: {
-            "model": ErrorResponse,
+            "model": schemas.ErrorResponse,
             "description": "Task failed",
             "content": {
                 "application/json": {
@@ -538,7 +526,7 @@ async def get_task_status(
             },
         },
         404: {
-            "model": ErrorResponse,
+            "model": schemas.ErrorResponse,
             "description": "Task not found",
             "content": {
                 "application/json": {
@@ -575,12 +563,12 @@ async def get_task_result(
 
     status_enum = task_presenter.normalize_status(task)
 
-    if status_enum in {TaskStatus.PENDING, TaskStatus.IN_PROGRESS}:
+    if status_enum in {schemas.TaskStatus.PENDING, schemas.TaskStatus.IN_PROGRESS}:
         created_at, updated_at = task_presenter.extract_timestamps(task)
         # Return 202 with status payload
         return JSONResponse(
             status_code=202,
-            content=TaskStatusResponse(
+            content=schemas.TaskStatusResponse(
                 task_id=cast(str, getattr(task, "task_id", "")),
                 status=status_enum,
                 progress=None,
@@ -590,7 +578,7 @@ async def get_task_result(
             ).model_dump(),
         )
 
-    if status_enum is TaskStatus.FAILED:
+    if status_enum is schemas.TaskStatus.FAILED:
         err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))
         raise HTTPException(status_code=400, detail=f"Task failed: {err_msg or 'unspecified error'}")
 
