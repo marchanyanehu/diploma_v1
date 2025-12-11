@@ -55,10 +55,8 @@ Microservice layout with shared infrastructure (see `docs/ARCHITECTURE.md` for d
 ### Shared Infrastructure (`shared/`)
 
 - **`config.py`**: Application settings (database, Redis, LLM, security) used by all services
-- **`schemas.py`**: Pydantic API contracts (request/response models)
 - **`database/`**: Database layer (connection, ORM models, CRUD utilities) shared across services
 - **`celery_app.py`**: Celery configuration and task queues
-- **`llm_client.py`**: LLM abstraction layer (DeepSeek via Baseten, Gemini, OpenAI)
 - **`input_sanitization.py`**: Prompt injection protection
 
 ## Key Features

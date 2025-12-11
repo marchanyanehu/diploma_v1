@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, cast
 
 from shared.database import ScrapingTask
-from shared.schemas import TaskStatus, TaskStatusResponse, ScrapeResult
+from ..schemas import TaskStatus, TaskStatusResponse, ScrapeResult
 
 
 def normalize_status(task: ScrapingTask) -> TaskStatus:

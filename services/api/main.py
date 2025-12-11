@@ -28,7 +28,7 @@ from shared.database import get_db, create_tables, ScrapingTask, ParserCache, Us
 from shared.config import settings
 from .logging_config import setup_logging
 from .error_handlers import register_error_handlers
-from shared.schemas import (
+from .schemas import (
     ScrapeRequest,
     TaskResponse,
     TaskStatus,

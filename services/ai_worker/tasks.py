@@ -10,7 +10,7 @@ from shared.database import SessionLocal
 import shared.database as db_utils
 from shared.input_sanitization import sanitize_user_input, InputSanitizationError
 from .intent_extraction import extract_intent
-from shared.llm_client import LLMClient
+from .llm_client import LLMClient
 from . import workflows
 from . import utils
 

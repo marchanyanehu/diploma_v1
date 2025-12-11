@@ -1,12 +1,12 @@
 """
-DEPRECATED: API schemas moved to shared.schemas
+DEPRECATED: API schemas moved to services.api.schemas
 
 This module is maintained for backward compatibility only.
-Import from shared.schemas instead.
+Import from .schemas instead.
 """
 
-# Re-export everything from shared.schemas for backward compatibility
-from shared.schemas import (
+# Re-export everything from local schemas for backward compatibility
+from .schemas import (
     UserCreate,
     UserResponse,
     Token,

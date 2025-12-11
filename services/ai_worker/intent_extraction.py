@@ -33,7 +33,7 @@ import re
 import logging
 from typing import Any, Dict, List, Optional
 
-from shared.llm_client import LLMClient
+from .llm_client import LLMClient
 from .prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_TEMPLATE
 
 logger = logging.getLogger(__name__)

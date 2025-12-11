@@ -19,7 +19,8 @@ services/api/
 ├── main.py              # FastAPI app, routes, rate limiting
 ├── auth.py              # JWT authentication helpers
 ├── config.py            # DEPRECATED: Re-exports from shared.config
-├── models.py            # DEPRECATED: Re-exports from shared.schemas
+├── models.py            # DEPRECATED: Re-exports from .schemas
+├── schemas.py           # Pydantic request/response schemas (API contracts)
 ├── repositories.py      # DB repositories
 ├── services/            # task_service, auth_service, task_presenter
 ├── logging_config.py    # Structured logging
@@ -29,9 +30,7 @@ services/api/
 
 shared/                  # Shared infrastructure across all services
 ├── config.py            # Settings loader (env/.env) - used by all services
-├── schemas.py           # Pydantic request/response schemas (API contracts)
 ├── celery_app.py        # Celery configuration
-├── llm_client.py        # LiteLLM wrapper (DeepSeek/Gemini/OpenAI)
 ├── input_sanitization.py# Prompt injection protection
 └── database/            # Database layer (shared across services)
     ├── __init__.py      # Exports all DB components
@@ -40,6 +39,7 @@ shared/                  # Shared infrastructure across all services
     └── utils.py         # Database CRUD operations
 
 services/ai_worker/      # AI worker service
+├── llm_client.py        # LLM abstraction (DeepSeek/Gemini/OpenAI)
 ├── intent_extraction.py # User prompt → structured intent
 ├── regex_generation.py  # Iterative regex generation
 ├── workflows.py         # Schema extraction and caching
@@ -125,12 +125,17 @@ Background work is dispatched via Celery to `headless_worker` (fetching_queue) a
 The project follows microservices principles with shared infrastructure:
 
 - **`shared/config.py`**: Application settings used by all services (database, Redis, LLM, security)
-- **`shared/schemas.py`**: Pydantic API contracts shared between services
 - **`shared/database/`**: Database layer accessible to all services (connection, models, utilities)
+- **`services/api/schemas.py`**: Pydantic API contracts (request/response models)
+- **`services/ai_worker/llm_client.py`**: LLM abstraction layer (DeepSeek/Gemini/OpenAI)
 - **`services/api/config.py`**: Backward-compatible stub (re-exports from `shared.config`)
-- **`services/api/models.py`**: Backward-compatible stub (re-exports from `shared.schemas`)
+- **`services/api/models.py`**: Backward-compatible stub (re-exports from `.schemas`)
 
-New code should import from `shared.*` modules directly.
+New code should:
+- Import config from `shared.config`
+- Import database from `shared.database`
+- Import schemas from `services.api.schemas` (within API) or `.schemas` (relative)
+- Import LLM client from `services.ai_worker.llm_client` (within AI worker)
 
 ## Security
 

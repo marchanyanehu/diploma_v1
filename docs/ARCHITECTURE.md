@@ -75,10 +75,8 @@ Shared across all services to prevent duplication:
 | Module | Purpose | Used By |
 |--------|---------|--------|
 | **config.py** | Application settings (DB, Redis, LLM, security) | All services, tests, migrations |
-| **schemas.py** | Pydantic API contracts (request/response models) | API service, tests |
 | **database/** | Database layer (connection, models, utilities) | All services, tests, migrations |
 | **celery_app.py** | Celery configuration and task queues | All workers, scheduler |
-| **llm_client.py** | LLM abstraction (DeepSeek/Gemini/OpenAI) | AI worker |
 | **input_sanitization.py** | Prompt injection protection | API service |
 
 ### Database Module (`shared/database/`)

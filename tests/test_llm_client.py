@@ -1,7 +1,7 @@
 import os
 import pytest
 
-from shared.llm_client import LLMClient, _resolve_model_name
+from services.ai_worker.llm_client import LLMClient, _resolve_model_name
 
 
 def test_resolve_model_name_prefixes():
@@ -52,7 +52,7 @@ def test_chat_uses_fallback_when_primary_fails(monkeypatch):
             raise RuntimeError("primary down")
         return {"choices": [{"message": {"content": "ok"}}]}
 
-    monkeypatch.setattr("shared.llm_client.completion", fake_completion)
+    monkeypatch.setattr("services.ai_worker.llm_client.completion", fake_completion)
     monkeypatch.setenv("LLM_PROVIDER", "baseten")
     monkeypatch.setenv("LLM_MODEL", "baseten/deepseek-ai/DeepSeek-V3.2")
     monkeypatch.setenv("LLM_FALLBACK_PROVIDER", "gemini")

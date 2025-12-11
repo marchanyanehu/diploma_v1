@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from shared.database import User, ScrapingTask, ParserCache, ScheduledJob, Domain
-from shared.schemas import TaskStatus
+from .schemas import TaskStatus
 
 
 class UserRepository:

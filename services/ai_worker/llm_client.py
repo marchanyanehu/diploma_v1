@@ -17,7 +17,7 @@ Environment variables:
   - LLM_MAX_RETRIES (default: 2)
 
 Usage:
-  from shared.llm_client import LLMClient
+  from services.ai_worker.llm_client import LLMClient
   client = LLMClient.from_env()
   text = client.generate_text("Summarize: ...")
 
