@@ -147,41 +147,26 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                     task_id, url, intent, matched_texts, html_content, llm, db
                 )
             
-            # Fallback to generic regex
-            if not extracted_data and not is_multi_field:
-                utils.log_event(task_id, "fallback_to_generic_regex")
+            # Use unified field extraction for both single and multi-field
+            if not extracted_data:
+                utils.log_event(task_id, "field_extraction_start", is_multi_field=is_multi_field)
                 
-                if is_attribute_target:
-                    # Retry step 2 for generic text if attribute failed
-                    matched_texts = workflows.step2_find_matching_text(
-                        task_id, text_content, intent, is_multi_field, False, keywords, llm
-                    )
-                    utils.log_event(task_id, "step_2_retry_complete", count=len(matched_texts))
-
-                # Steps 3-4: Find snippet
-                snippet_result = workflows.steps3_4_find_and_select_snippet(
-                    task_id, search_content, matched_texts, intent, llm
-                )
-                best_snippet = snippet_result.get("snippet", "")
-                micro_snippets = snippet_result.get("micro_snippets", "")
+                # For single field, use the target as the field name
+                if not is_multi_field:
+                    field_keywords = [intent.get("target", "value")]
+                else:
+                    field_keywords = keywords
                 
-                utils.log_event(task_id, "step_5_generate_regex", 
-                           snippet_len=len(best_snippet),
-                           micro_len=len(micro_snippets),
-                           micro_preview=micro_snippets[:300] if micro_snippets else "")
-                
-                snippet_to_use = micro_snippets if micro_snippets else best_snippet
-                if not snippet_to_use or len(snippet_to_use) < 50:
-                    snippet_to_use = best_snippet if best_snippet else search_content[:32000]
-
-                extracted_data = workflows.run_single_field_extraction(
-                    task_id, url, intent, matched_texts, search_content, 
-                    best_snippet, snippet_to_use, llm, db
-                )
-            
-            elif is_multi_field and not extracted_data:
                 extracted_data = workflows.run_multi_field_extraction(
-                    task_id, keywords, matched_texts, search_content, search_content[:32000], llm
+                    task_id=task_id,
+                    keywords=field_keywords,
+                    example_texts=matched_texts,
+                    search_content=search_content,
+                    snippet_to_use=search_content[:32000],
+                    llm=llm,
+                    url=url,
+                    db=db,
+                    intent=intent
                 )
 
         # Persist Results

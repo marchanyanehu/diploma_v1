@@ -262,13 +262,29 @@ def _find_example_in_content(example: str, content: str) -> int:
 
 def run_multi_field_extraction(
     task_id: str, keywords: List[str], example_texts: List[str],
-    search_content: str, snippet_to_use: str, llm: LLMClient
+    search_content: str, snippet_to_use: str, llm: LLMClient,
+    url: str = None, db = None, intent: Dict = None
 ) -> List[Dict[str, Any]]:
-    """Generate separate regex for each field and combine results by position."""
-    log_event(task_id, "multi_field_extraction", fields=keywords)
+    """
+    Generate regex for each field and combine results by position.
+    Works for both single-field and multi-field extraction.
+    
+    Args:
+        task_id: Task identifier for logging
+        keywords: List of field names to extract (can be single field)
+        example_texts: Example values found by LLM
+        search_content: Full HTML/text content to search
+        snippet_to_use: Fallback snippet for regex generation
+        llm: LLM client
+        url: Optional URL for caching parsers
+        db: Optional database session for caching
+        intent: Optional intent dict for caching metadata
+    """
+    log_event(task_id, "field_extraction", fields=keywords)
     
     # Store matches with positions for each field
     field_matches: Dict[str, List[tuple]] = {}
+    field_patterns: Dict[str, Dict[str, str]] = {}  # Store patterns for caching
     
     # PHASE 1: Collect snippets for ALL fields first
     # This allows us to use snippets from one field for another when needed
@@ -277,6 +293,11 @@ def run_multi_field_extraction(
     
     for field in keywords:
         field_examples = extract_field_examples(example_texts, field)
+        
+        # For single-field extraction, example_texts ARE the examples
+        if not field_examples and len(keywords) == 1:
+            field_examples = [ex for ex in example_texts if ex and len(ex.strip()) > 0][:5]
+        
         if not field_examples:
             log_event(task_id, "field_no_examples", field=field)
             continue
@@ -328,24 +349,24 @@ def run_multi_field_extraction(
             examples=field_examples,
             target_desc=f"{field} values",
             llm=llm,
-            max_iterations=2,
+            max_iterations=3,
             snippet=combined_snippet
         )
         
         if gen.get("success"):
             pattern = gen.get("final_pattern")
             flags = gen.get("final_flags", "s")
+            field_patterns[field] = {"pattern": pattern, "flags": flags}
+            
+            # Log the generated pattern for debugging
+            log_event(task_id, "field_regex_generated", field=field, pattern=pattern[:200] if pattern else None, flags=flags)
+            
             matches_with_pos = _get_matches_with_positions(pattern, flags, search_content)
             if matches_with_pos:
-                # Deduplicate while preserving first occurrence position
-                seen = set()
-                unique_matches = []
-                for text, pos in matches_with_pos:
-                    if text not in seen:
-                        seen.add(text)
-                        unique_matches.append((text, pos))
-                field_matches[field] = unique_matches
-                log_event(task_id, "field_regex_success", field=field, match_count=len(unique_matches))
+                # Keep ALL matches with positions for position-based grouping
+                # Do NOT deduplicate - we need all occurrences for proper grouping
+                field_matches[field] = matches_with_pos
+                log_event(task_id, "field_regex_success", field=field, match_count=len(matches_with_pos))
             else:
                 log_event(task_id, "field_regex_no_matches", field=field, pattern=pattern)
         else:
@@ -361,7 +382,7 @@ def run_multi_field_extraction(
             log_event(task_id, "field_regex_failed", field=field, 
                       error=gen.get("error"), issues=last_issues, pattern=last_pattern)
     
-    # Group matches by position - only records with ALL fields
+    # Group matches by position
     grouped_records = _group_matches_by_position(field_matches, keywords)
     log_event(task_id, "position_grouping", 
               total_fields=len(field_matches), 
@@ -369,16 +390,71 @@ def run_multi_field_extraction(
     
     # Convert to output format
     extracted_data = []
-    for record in grouped_records:
-        text_repr = " | ".join(f"{k}: {v}" for k, v in record.items())
-        extracted_data.append({
-            "text": text_repr,
-            "fields": record,
-            "source": "multi_field_regex",
-            "confidence": 0.85
-        })
+    is_single_field = len(keywords) == 1
     
-    log_event(task_id, "multi_field_success", record_count=len(extracted_data))
+    for record in grouped_records:
+        if is_single_field:
+            # Single field: simple format for backwards compatibility
+            field_name = keywords[0]
+            value = record.get(field_name)
+            if value:
+                extracted_data.append({
+                    "text": value,
+                    "source": "generated_regex",
+                    "confidence": 0.9
+                })
+        else:
+            # Multi-field: include fields dict
+            # Filter out None values for cleaner output
+            filtered_record = {k: v for k, v in record.items() if v is not None}
+            if filtered_record:
+                text_repr = " | ".join(f"{k}: {v}" for k, v in filtered_record.items())
+                extracted_data.append({
+                    "text": text_repr,
+                    "fields": record,  # Keep full record with Nones for consistency
+                    "source": "generated_regex",
+                    "confidence": 0.85
+                })
+    
+    # Cache patterns if we have db access and successful patterns
+    if db and url and field_patterns and extracted_data:
+        try:
+            if is_single_field and len(field_patterns) == 1:
+                # Single field: cache simple pattern
+                field = keywords[0]
+                pinfo = field_patterns[field]
+                db_utils.record_new_parser(
+                    db,
+                    task_id=task_id,
+                    url=url,
+                    intent=intent or {"keywords": keywords},
+                    pattern=f"(?{pinfo['flags']}:{pinfo['pattern']})",
+                    flags=pinfo['flags'],
+                    matches_count=len(extracted_data),
+                    source_type="CONTENT",
+                    sample_input=snippet_to_use[:2000],
+                    sample_output=[{"text": d["text"]} for d in extracted_data[:5]]
+                )
+            else:
+                # Multi-field: cache as schema
+                combined_pattern = json.dumps({"schema_fields": keywords, "field_regexes": field_patterns})
+                db_utils.record_new_parser(
+                    db,
+                    task_id=task_id,
+                    url=url,
+                    intent=intent or {"keywords": keywords, "schema_fields": keywords},
+                    pattern=f"(?s:SCHEMA:{combined_pattern})",
+                    flags="s",
+                    matches_count=len(extracted_data),
+                    source_type="SCHEMA",
+                    sample_input=snippet_to_use[:2000],
+                    sample_output=[{"text": d["text"]} for d in extracted_data[:5]]
+                )
+            log_event(task_id, "parser_cached", fields=list(field_patterns.keys()))
+        except Exception as e:
+            logger.warning(f"Failed to cache parser: {e}")
+    
+    log_event(task_id, "field_extraction_success", record_count=len(extracted_data))
     return extracted_data
 
 def run_schema_extraction_with_cache(
@@ -645,7 +721,7 @@ def run_schema_extraction_with_cache(
     # Identify fields that failed regex generation or validation
     failed_fields = [f for f in schema_fields if f in field_examples and field_examples[f] and f not in validated_field_regexes]
     
-    # Retry failed fields using single-field extraction approach
+    # Retry failed fields using unified field extraction
     if failed_fields and db:
         log_event(task_id, "schema_regex_retry_start", failed_fields=failed_fields)
         
@@ -655,11 +731,6 @@ def run_schema_extraction_with_cache(
                 continue
             
             try:
-                field_intent = {
-                    "target": field,
-                    "keywords": [field] + [ex[:30] for ex in examples[:2]],
-                }
-                
                 snippets = []
                 for ex in examples[:3]:
                     if ex and ex in html_content:
@@ -668,17 +739,15 @@ def run_schema_extraction_with_cache(
                             snippets.append(extract_snippet(html_content, idx, len(ex), context=300))
                 
                 snippet_to_use = "\n---\n".join(snippets[:3]) if snippets else html_content[:4000]
-                best_snippet = html_content[:4000]
                 
-                single_result = run_single_field_extraction(
+                single_result = run_multi_field_extraction(
                     task_id=f"{task_id}_retry_{field}",
-                    url=url,
-                    intent=field_intent,
+                    keywords=[field],
                     example_texts=examples[:5],
                     search_content=html_content,
-                    best_snippet=best_snippet,
                     snippet_to_use=snippet_to_use,
                     llm=llm,
+                    url=url,
                     db=db
                 )
                 
@@ -835,52 +904,4 @@ def run_attribute_extraction(
     else:
         log_event(task_id, "attribute_extraction_failed_all_methods")
     
-    return extracted_data
-
-def run_single_field_extraction(
-    task_id: str, url: str, intent: Dict, example_texts: List[str],
-    search_content: str, best_snippet: str, snippet_to_use: str,
-    llm: LLMClient, db
-) -> List[Dict[str, Any]]:
-    """Run the iterative regex generation pipeline for a single field."""
-    gen_result = regex_generation.iterative_regex_generation(
-        source=search_content,
-        examples=example_texts,
-        target_desc=intent.get("target", "target data"),
-        llm=llm,
-        max_iterations=3,
-        snippet=snippet_to_use
-    )
-    
-    extracted_data = []
-    if gen_result.get("success"):
-        final_pattern = gen_result.get("final_pattern")
-        final_flags = gen_result.get("final_flags", "s")
-        
-        matches = apply_regex_matches(final_pattern, final_flags, search_content)
-        if matches:
-            unique_matches = list(dict.fromkeys(matches))
-            extracted_data = [{"text": m, "source": "generated_regex", "confidence": 0.9} for m in unique_matches]
-            
-            try:
-                db_utils.record_new_parser(
-                    db,
-                    task_id=task_id,
-                    url=url,
-                    intent=intent,
-                    pattern=f"(?{final_flags}:{final_pattern})",
-                    flags=final_flags,
-                    matches_count=len(unique_matches),
-                    source_type="CONTENT",
-                    sample_input=best_snippet,
-                    sample_output=[{"text": m} for m in unique_matches[:5]]
-                )
-                log_event(task_id, "parser_cached")
-            except Exception as e:
-                logger.warning(f"Failed to cache parser: {e}")
-        else:
-            log_event(task_id, "generated_regex_no_matches_on_full_content")
-    else:
-        log_event(task_id, "regex_generation_failed", error=gen_result.get("error"))
-        
     return extracted_data
