@@ -12,7 +12,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from ..models import TaskStatus
+from ..schemas import TaskStatus
 from ..repositories import TaskRepository
 
 logger = logging.getLogger(__name__)

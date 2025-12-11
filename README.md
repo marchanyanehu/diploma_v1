@@ -51,13 +51,13 @@ Microservice layout with shared infrastructure (see `docs/ARCHITECTURE.md` for d
     - Uses LLM (DeepSeek/Gemini/OpenAI) for intent, extraction, and regex generation
     - Field-based caching with complete URL matching for fast reuse
     - Runs on Celery `ai_queue`
+    - Input sanitization module (`services/ai_worker/input_sanitization.py`) reused by the API
 
 ### Shared Infrastructure (`shared/`)
 
 - **`config.py`**: Application settings (database, Redis, LLM, security) used by all services
 - **`database/`**: Database layer (connection, ORM models, CRUD utilities) shared across services
 - **`celery_app.py`**: Celery configuration and task queues
-- **`input_sanitization.py`**: Prompt injection protection
 
 ## Key Features
 

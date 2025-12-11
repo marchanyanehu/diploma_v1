@@ -21,7 +21,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 # Input sanitization
-from shared.input_sanitization import sanitize_user_input, InputSanitizationError
+from services.ai_worker.input_sanitization import sanitize_user_input, InputSanitizationError
 
 # Import database components
 from shared.database import get_db, create_tables, ScrapingTask, ParserCache, User

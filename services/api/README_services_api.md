@@ -9,7 +9,7 @@ This is the main API service for the Intelligent Web Data Aggregator project. It
 - **Scheduling**: per-user cron schedules via `/api/v1/jobs`.
 - **Celery integration**: enqueues headless + AI workers (`shared/celery_app.py`).
 - **Rate Limiting**: slowapi-based limits (10/min process, 5/min register, 10/min login).
-- **Input Sanitization**: Prompt injection protection via `shared/input_sanitization.py`.
+- **Input Sanitization**: Prompt injection protection via `services/ai_worker/input_sanitization.py`.
 - **FastAPI extras**: OpenAPI docs, CORS, error handlers, logging.
 
 ## Project Structure
@@ -31,7 +31,6 @@ services/api/
 shared/                  # Shared infrastructure across all services
 ├── config.py            # Settings loader (env/.env) - used by all services
 ├── celery_app.py        # Celery configuration
-├── input_sanitization.py# Prompt injection protection
 └── database/            # Database layer (shared across services)
     ├── __init__.py      # Exports all DB components
     ├── connection.py    # Session & engine management
@@ -39,6 +38,7 @@ shared/                  # Shared infrastructure across all services
     └── utils.py         # Database CRUD operations
 
 services/ai_worker/      # AI worker service
+├── input_sanitization.py# Prompt injection protection reused by API
 ├── llm_client.py        # LLM abstraction (DeepSeek/Gemini/OpenAI)
 ├── intent_extraction.py # User prompt → structured intent
 ├── regex_generation.py  # Iterative regex generation
@@ -146,7 +146,7 @@ New code should:
 - `/auth/token`: 10 requests/minute per IP
 
 ### Input Sanitization
-User prompts are sanitized via `shared/input_sanitization.py` before processing:
+User prompts are sanitized via `services/ai_worker/input_sanitization.py` before processing:
 - Blocks prompt injection attempts ("ignore previous instructions", etc.)
 - Blocks jailbreak patterns ("DAN mode", "no restrictions", etc.)
 - Blocks system prompt extraction attempts

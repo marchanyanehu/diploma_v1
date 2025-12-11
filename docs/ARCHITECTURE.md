@@ -77,7 +77,8 @@ Shared across all services to prevent duplication:
 | **config.py** | Application settings (DB, Redis, LLM, security) | All services, tests, migrations |
 | **database/** | Database layer (connection, models, utilities) | All services, tests, migrations |
 | **celery_app.py** | Celery configuration and task queues | All workers, scheduler |
-| **input_sanitization.py** | Prompt injection protection | API service |
+
+Input sanitization lives in `services/ai_worker/input_sanitization.py` and is imported by the API to block prompt-injection attempts before queueing work.
 
 ### Database Module (`shared/database/`)
 

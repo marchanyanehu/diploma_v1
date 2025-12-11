@@ -1,7 +1,7 @@
 """Unit tests for input sanitization module (prompt injection protection)."""
 
 import pytest
-from shared.input_sanitization import (
+from services.ai_worker.input_sanitization import (
     sanitize_user_input,
     InputSanitizationError,
     check_dangerous_patterns,
