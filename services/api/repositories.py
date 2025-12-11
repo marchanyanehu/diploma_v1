@@ -6,8 +6,8 @@ from typing import Optional, Iterable, List, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from .db_models import User, ScrapingTask, ParserCache, ScheduledJob, Domain
-from .models import TaskStatus
+from shared.database import User, ScrapingTask, ParserCache, ScheduledJob, Domain
+from shared.schemas import TaskStatus
 
 
 class UserRepository:

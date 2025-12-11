@@ -1,8 +1,8 @@
 """
-Database configuration and session management for the FastAPI application.
+Database connection and session management.
 
 This module sets up SQLAlchemy database connection, session management,
-and provides utilities for database operations.
+and provides utilities for database operations shared across all services.
 """
 
 from sqlalchemy import create_engine
@@ -10,8 +10,6 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 import logging
-
-from .config import Settings
 import os
 
 # Configure logging
@@ -21,8 +19,22 @@ logger = logging.getLogger(__name__)
 def _env_flag(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
-# Create settings instance
-settings = Settings()
+# Import settings from shared config
+try:
+    from shared.config import Settings
+    settings = Settings()
+except ImportError:
+    # Fallback if config not available
+    class FallbackSettings:
+        debug = _env_flag("DEBUG", False)
+        database_url = os.getenv("DATABASE_URL", "")
+        db_host = os.getenv("DB_HOST", "localhost")
+        db_port = int(os.getenv("DB_PORT", "5432"))
+        db_name = os.getenv("DB_NAME", "diploma_db")
+        db_user = os.getenv("DB_USER", "app_write")
+        db_password = os.getenv("DB_PASSWORD", "change-me-strong-app-write")
+    
+    settings = FallbackSettings()  # type: ignore
 
 # Optional: mute SQLAlchemy engine logs and echo based on env flag
 MUTE_SQLALCHEMY_LOGGING = _env_flag("SQLALCHEMY_MUTE_LOGGING", False)

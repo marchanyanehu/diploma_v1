@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 import logging
 
-from .db_models import (
+from .models import (
     ScrapingTask, ParserCache, User, ScheduledJob,
     Domain, TaskSourceData, TaskIntent, ParserSample
 )
@@ -68,11 +68,6 @@ def create_scraping_task(
 def get_scraping_task(db: Session, task_id: str) -> Optional[ScrapingTask]:
     """Get a scraping task by task_id."""
     return db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).first()
-
-
-# Old caching functions removed - now using field-based caching:
-# - create_parser_cache -> create_parser_cache_by_fields
-# - find_cached_parser -> find_cached_parser_by_fields
 
 
 def update_task_status(
@@ -212,8 +207,6 @@ def persist_extraction_result(
     used_cached_parser: bool = False,
 ):
     """Persist final extraction result onto a task row."""
-    from .db_models import ScrapingTask  # local import to avoid circular issues
-
     update_data: Dict[Any, Any] = {
         ScrapingTask.extracted_data: extracted_data,
         ScrapingTask.total_matches: total_matches,
@@ -233,9 +226,6 @@ def persist_extraction_result(
     db.commit()
 
 
-# record_new_parser removed - now using create_parser_cache_by_fields for field-based caching
-
-
 def create_scheduled_job(
     db: Session,
     url: str,
@@ -249,8 +239,16 @@ def create_scheduled_job(
     db.refresh(job)
     return job
 
-def get_scheduled_jobs(db: Session, owner_id: int) -> List[ScheduledJob]:
+def get_scheduled_jobs_by_user(db: Session, owner_id: int) -> List[ScheduledJob]:
     return db.query(ScheduledJob).filter(ScheduledJob.owner_id == owner_id).all()
+
+def get_due_jobs(db: Session) -> List[ScheduledJob]:
+    """Get all active scheduled jobs that are due to run."""
+    now = datetime.now(timezone.utc)
+    return db.query(ScheduledJob).filter(
+        ScheduledJob.is_active == True,
+        ScheduledJob.next_run_at <= now
+    ).all()
 
 def delete_scheduled_job(db: Session, job_id: int, owner_id: int) -> bool:
     job = db.query(ScheduledJob).filter(ScheduledJob.id == job_id, ScheduledJob.owner_id == owner_id).first()
@@ -301,10 +299,10 @@ def find_cached_parser_by_fields(
     limit: int = 3,
     url_pattern: Optional[str] = None,
 ) -> List[ParserCache]:
-    """Find cached parsers by domain + path pattern + field combination.
+    """Find cached parsers by domain + complete URL + field combination.
     
     This allows regex reuse across different prompts as long as they extract
-    the same fields from the same domain/path pattern.
+    the same fields from the exact same URL.
     
     Args:
         db: Database session
@@ -313,7 +311,7 @@ def find_cached_parser_by_fields(
         source_type: Content type ('SEMANTIC', 'HTML', 'JSON')
         confidence_threshold: Minimum confidence score
         limit: Max parsers to return
-        url_pattern: URL pattern (e.g., 'amazon.com/books/*') for path-aware matching
+        url_pattern: Complete URL for precise matching
         
     Returns:
         List of matching ParserCache objects, ordered by best match
@@ -329,7 +327,7 @@ def find_cached_parser_by_fields(
         ParserCache.is_active == True,  # noqa: E712
     ]
     
-    # Add URL pattern matching if provided
+    # Add URL matching if provided (exact match)
     if url_pattern:
         filters.append(ParserCache.url_pattern == url_pattern)
     
@@ -374,10 +372,10 @@ def create_parser_cache_by_fields(
     sample_input: Optional[str] = None,
     sample_output: Optional[List[Dict[str, Any]]] = None
 ) -> ParserCache:
-    """Create parser cache entry indexed by fields and URL pattern.
+    """Create parser cache entry indexed by fields and complete URL.
     
     This allows the same regex to be reused for different prompts
-    as long as they extract the same fields from the same URL pattern.
+    as long as they extract the same fields from the exact same URL.
     
     Args:
         db: Database session
@@ -388,7 +386,7 @@ def create_parser_cache_by_fields(
         created_by_task_id: Task that created this parser
         test_matches_count: Number of items matched during generation
         confidence_score: Initial confidence (0-100)
-        url_pattern: URL pattern (e.g., 'amazon.com/books/*') for path-specific caching
+        url_pattern: Complete URL for precise caching
         sample_input: Sample input content used for regex generation
         sample_output: Sample extracted items
         
@@ -453,4 +451,3 @@ def invalidate_parser(db: Session, parser_id: int) -> None:
     })
     db.commit()
     logger.info(f"Invalidated parser {parser_id}")
-

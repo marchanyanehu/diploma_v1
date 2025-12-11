@@ -24,12 +24,11 @@ from slowapi.errors import RateLimitExceeded
 from shared.input_sanitization import sanitize_user_input, InputSanitizationError
 
 # Import database components
-from .database import get_db, create_tables
-from .config import settings
+from shared.database import get_db, create_tables, ScrapingTask, ParserCache, User
+from shared.config import settings
 from .logging_config import setup_logging
 from .error_handlers import register_error_handlers
-from .db_models import ScrapingTask, ParserCache, User
-from .models import (
+from shared.schemas import (
     ScrapeRequest,
     TaskResponse,
     TaskStatus,

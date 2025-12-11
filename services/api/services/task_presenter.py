@@ -7,8 +7,8 @@ Keeps presentation logic separate from transport (FastAPI) and persistence layer
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, cast
 
-from ..db_models import ScrapingTask
-from ..models import TaskStatus, TaskStatusResponse, ScrapeResult
+from shared.database import ScrapingTask
+from shared.schemas import TaskStatus, TaskStatusResponse, ScrapeResult
 
 
 def normalize_status(task: ScrapingTask) -> TaskStatus:

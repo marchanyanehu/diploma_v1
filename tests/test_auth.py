@@ -2,7 +2,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from services.api.main import app
-from services.api import auth, db_utils
+from services.api import auth
+import shared.database as db_utils
 
 def test_register_user(client):
     response = client.post(

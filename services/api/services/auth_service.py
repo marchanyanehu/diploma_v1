@@ -12,7 +12,7 @@ import logging
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from ..db_models import User
+from shared.database import User
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)

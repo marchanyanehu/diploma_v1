@@ -153,7 +153,7 @@ class LLMClient:
         if not model:
             try:
                 # Lazy import to avoid cyclic deps in tests
-                from services.api.config import settings  # type: ignore
+                from shared.config import settings  # type: ignore
 
                 model = getattr(settings, "llm_model", DEFAULT_MODEL)
             except Exception:
@@ -162,7 +162,7 @@ class LLMClient:
         fallback_provider = os.getenv("LLM_FALLBACK_PROVIDER")
         if not fallback_provider:
             try:
-                from services.api.config import settings  # type: ignore
+                from shared.config import settings  # type: ignore
 
                 fallback_provider = getattr(settings, "llm_fallback_provider", DEFAULT_FALLBACK_PROVIDER)
             except Exception:
@@ -171,7 +171,7 @@ class LLMClient:
         fallback_model = os.getenv("LLM_FALLBACK_MODEL")
         if not fallback_model:
             try:
-                from services.api.config import settings  # type: ignore
+                from shared.config import settings  # type: ignore
 
                 fallback_model = getattr(settings, "llm_fallback_model", DEFAULT_GEMINI_MODEL)
             except Exception:

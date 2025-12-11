@@ -1,14 +1,13 @@
 
 from datetime import timedelta
 from typing import Optional
-from .config import settings
+from shared.config import settings
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError
 
-from .database import get_db
-from .db_models import User
+from shared.database import get_db, User
 from .services.auth_service import (
     AuthService,
     SqlAlchemyUserRepository,

@@ -12,9 +12,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from services.api.database import Base  # type: ignore
-from services.api import db_models  # noqa: F401  # ensure models are imported
-from services.api.config import Settings  # type: ignore
+from shared.database import Base  # type: ignore
+from shared import database  # noqa: F401  # ensure models are imported
+from shared.config import Settings  # type: ignore
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

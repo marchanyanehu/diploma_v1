@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from services.ai_worker.tasks import process_request_full
-from services.api import db_utils
+import shared.database as db_utils
 
 # We don't need a real DB for this test if we mock SessionLocal correctly.
 # Or we can use an in-memory DB.

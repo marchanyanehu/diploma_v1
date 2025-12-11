@@ -375,8 +375,8 @@ def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
         
     except Exception as exc:
         logger.exception("headless.fetch_page.failed", extra={"task_id": task_id})
-        from services.api.database import SessionLocal
-        from services.api import db_utils
+        from shared.database import SessionLocal
+        import shared.database as db_utils
         db = SessionLocal()
         try:
             db_utils.update_task_status(db, task_id=task_id, status="FAILED", error_message=f"Fetch failed: {str(exc)}")

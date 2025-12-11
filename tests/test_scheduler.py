@@ -2,10 +2,11 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from services.scheduler.tasks import check_due_jobs
-from services.api import db_utils, db_models
+import shared.database as db_utils
+from shared.database import ScheduledJob
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from services.api.database import Base, get_db
+from shared.database import Base, get_db
 from services.api.main import app
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +25,7 @@ def test_scheduler_check_due_jobs(mock_send_task, mock_session_cls):
     now = datetime.now(timezone.utc)
     past = now - timedelta(minutes=10)
     
-    job = db_models.ScheduledJob(
+    job = ScheduledJob(
         id=1,
         url="http://example.com",
         prompt="test",

@@ -14,8 +14,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from services.api.main import app, get_db
-from services.api.database import Base
-from services.api import auth, db_utils, db_models
+from shared.database import Base
+from services.api import auth
+import shared.database as db_utils
 
 # Use file-based DB for debugging
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_debug.db"

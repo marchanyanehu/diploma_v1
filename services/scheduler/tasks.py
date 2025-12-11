@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import or_
 from croniter import croniter
 from shared.celery_app import celery_app
-from services.api.database import SessionLocal
-from services.api.db_models import ScheduledJob
-from services.api import db_utils
+from shared.database import SessionLocal, ScheduledJob
+import shared.database as db_utils
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ import re
 from typing import List, Dict, Any, Optional, cast
 
 from shared.llm_client import LLMClient
-from services.api import db_utils
+import shared.database as db_utils
 from . import regex_generation
 from .prompts import (
     SCHEMA_EXTRACTION_SYSTEM_PROMPT,
