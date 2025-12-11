@@ -8,6 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+# Set TESTING flag before importing app to force in-memory rate limiter
+os.environ["TESTING"] = "1"
+
 # Ensure repo root is importable (so `services` package resolves)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
