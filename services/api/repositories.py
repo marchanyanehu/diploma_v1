@@ -53,6 +53,16 @@ class TaskRepository:
     def get_by_task_id(self, task_id: str) -> Optional[ScrapingTask]:
         return self.db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).first()
 
+    def list_for_owner(self, owner_id: int, limit: int = 100) -> List[ScrapingTask]:
+        """Return recent tasks for a specific user."""
+        return (
+            self.db.query(ScrapingTask)
+            .filter(ScrapingTask.owner_id == owner_id)
+            .order_by(ScrapingTask.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
 
 class ParserRepository:
     def __init__(self, db: Session) -> None:

@@ -47,7 +47,8 @@ def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
-        db_utils.update_task_status(db, task_id=task_id, status="STARTED")
+        # Mark task as actively processing; API treats IN_PROGRESS as running
+        db_utils.update_task_status(db, task_id=task_id, status="IN_PROGRESS")
 
         llm = LLMClient.from_env()
         utils.log_event(task_id, "phase_start", phase="intent_extraction")
@@ -93,13 +94,8 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # Use full URL as pattern for precise matching
         url_pattern = url
         
-        # Prepare content
-        text_content = inner_text
-        search_content = html_content if html_content and len(html_content) > len(inner_text) else inner_text
-        
         # Determine extraction mode
         keywords = intent.get("keywords", [])
-        is_multi_field = len(keywords) > 1
         schema_fields = intent.get("schema_fields", [])
         
         extracted_data = []

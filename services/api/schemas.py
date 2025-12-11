@@ -89,3 +89,9 @@ class ScheduledJobResponse(BaseModel):
     next_run_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
     created_at: datetime
+
+
+class UserActivityResponse(BaseModel):
+    """Combined view of a user's scheduled jobs and recent tasks."""
+    tasks: List[TaskStatusResponse]
+    scheduled_jobs: List[ScheduledJobResponse]

@@ -316,6 +316,27 @@ def delete_job(
         raise HTTPException(status_code=404, detail="Job not found")
     return {"message": "Job deleted"}
 
+
+@app.get(
+    "/api/v1/users/me/activity",
+    response_model=schemas.UserActivityResponse,
+    tags=["API v1", "Scheduler"],
+)
+def get_user_activity(
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    task_repo: TaskRepository = Depends(get_task_repo),
+    current_user: User = Depends(auth.get_current_user),
+):
+    """
+    Return current user's scheduled jobs together with their recent tasks.
+    
+    Helps clients show both queued schedules and already processed tasks in one call.
+    """
+    jobs = schedule_repo.list_for_owner(current_user.id)
+    tasks = task_repo.list_for_owner(current_user.id)
+    task_payloads = [task_presenter.build_status_response(t) for t in tasks]
+    return schemas.UserActivityResponse(tasks=task_payloads, scheduled_jobs=jobs)
+
 # --- Core API Endpoints ---
 
 @app.post(
@@ -564,19 +585,8 @@ async def get_task_result(
     status_enum = task_presenter.normalize_status(task)
 
     if status_enum in {schemas.TaskStatus.PENDING, schemas.TaskStatus.IN_PROGRESS}:
-        created_at, updated_at = task_presenter.extract_timestamps(task)
-        # Return 202 with status payload
-        return JSONResponse(
-            status_code=202,
-            content=schemas.TaskStatusResponse(
-                task_id=cast(str, getattr(task, "task_id", "")),
-                status=status_enum,
-                progress=None,
-                message=None,
-                created_at=created_at,
-                updated_at=updated_at,
-            ).model_dump(),
-        )
+        pending_payload = task_presenter.build_status_response(task)
+        return JSONResponse(status_code=202, content=pending_payload.model_dump())
 
     if status_enum is schemas.TaskStatus.FAILED:
         err_msg: Optional[str] = cast(Optional[str], getattr(task, "error_message", None))

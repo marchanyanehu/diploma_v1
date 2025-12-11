@@ -79,11 +79,23 @@ def update_task_status(
     """Update the status of a scraping task."""
     task = get_scraping_task(db, task_id)
     if task:
-        # Use UPDATE query to avoid SQLAlchemy attribute assignment issues
-        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update({
-            ScrapingTask.status: status,
+        # Normalize STARTED to IN_PROGRESS to align with API enums
+        normalized_status = "IN_PROGRESS" if status.upper() == "STARTED" else status
+
+        update_data: Dict[Any, Any] = {
+            ScrapingTask.status: normalized_status,
             ScrapingTask.error_message: error_message
-        })
+        }
+
+        now = datetime.now(timezone.utc)
+        # Populate lifecycle timestamps to keep progress reporting meaningful
+        if normalized_status == "IN_PROGRESS" and task.started_at is None:
+            update_data[ScrapingTask.started_at] = now
+        if normalized_status in ("SUCCESS", "FAILED"):
+            update_data[ScrapingTask.completed_at] = now
+
+        # Use UPDATE query to avoid SQLAlchemy attribute assignment issues
+        db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).update(update_data)
         db.commit()
         # Refresh to get updated data
         db.refresh(task)
