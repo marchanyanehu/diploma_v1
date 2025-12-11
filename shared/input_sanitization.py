@@ -235,21 +235,3 @@ def sanitize_user_input(
     user_input = re.sub(r"[ \t]+", " ", user_input)
     
     return user_input
-
-
-def is_safe_input(user_input: str) -> bool:
-    """Check if input is safe without raising exceptions.
-    
-    Convenience function for conditional checks.
-    
-    Args:
-        user_input: The input to check
-        
-    Returns:
-        True if input is safe, False otherwise
-    """
-    try:
-        sanitize_user_input(user_input)
-        return True
-    except InputSanitizationError:
-        return False

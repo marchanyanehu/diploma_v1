@@ -53,10 +53,6 @@ from .services.task_service import (
 from .services.auth_service import AuthService
 from .services import task_presenter
 from .repositories import UserRepository, TaskRepository, ScheduleRepository
-try:  # optional import for inline fallback
-    from services.headless_worker.tasks import process_request_task  # type: ignore
-except Exception:  # noqa: BLE001
-    process_request_task = None  # type: ignore
 
 # Configure logging centrally
 logger = setup_logging(settings.log_level, settings.api_log_file)
@@ -179,7 +175,7 @@ def get_task_service(db: Session = Depends(get_db)) -> TaskService:
     """Provide TaskService with injected dependencies (DIP)."""
     queue = CeleryTaskQueue(celery_app)
     task_repo = TaskRepository(db)
-    return TaskService(db=db, queue=queue, fallback_task=process_request_task, task_repo=task_repo)
+    return TaskService(db=db, queue=queue, task_repo=task_repo)
 
 
 def get_task_repo(db: Session = Depends(get_db)) -> TaskRepository:

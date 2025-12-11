@@ -20,9 +20,6 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-class TokenData(BaseModel):
-    username: Optional[str] = None
-
 class ScrapeRequest(BaseModel):
     url: HttpUrl
     prompt: str = Field(..., min_length=5, max_length=1000)

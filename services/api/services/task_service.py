@@ -6,10 +6,9 @@ dispatching so FastAPI routes remain thin and focused on transport concerns.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 import logging
-import os
 
 from sqlalchemy.orm import Session
 
@@ -52,7 +51,6 @@ class TaskService:
     db: Session
     queue: TaskQueue
     task_repo: TaskRepository
-    fallback_task: Optional[Callable[[str, str, str], None]] = None
 
     def create_task(self, url: str, prompt: str, owner_id: int) -> str:
         """Create a task record and enqueue async processing."""
@@ -77,18 +75,6 @@ class TaskService:
             logger.info("task_service.create_task.enqueued", extra={"task_id": task_id})
         except Exception as exc:  # noqa: BLE001
             logger.error("task_service.create_task.enqueue_failed", extra={"task_id": task_id, "error": str(exc)})
-
-        # Optional inline fallback for eager mode
-        if (os.getenv("CELERY_EAGER") or os.getenv("CELERY_ALWAYS_EAGER")) and self.fallback_task is not None:
-            try:
-                logger.info("task_service.create_task.inline_start", extra={"task_id": task_id})
-                self.fallback_task(task_id, url, prompt)
-                logger.info("task_service.create_task.inline_done", extra={"task_id": task_id})
-            except Exception as inline_exc:  # noqa: BLE001
-                logger.exception(
-                    "task_service.create_task.inline_failed",
-                    extra={"task_id": task_id, "error": str(inline_exc)},
-                )
 
         return task_id
 
