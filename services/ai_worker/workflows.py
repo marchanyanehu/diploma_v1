@@ -135,8 +135,9 @@ def _group_matches_by_position(
 ) -> List[Dict[str, Any]]:
     """
     Group field matches by their position in the source.
-    Matches within proximity_threshold chars of each other are considered part of the same record.
-    Missing fields are filled with None.
+    Uses field collision as the primary signal for record boundaries.
+    When we encounter a field that's already in the current record, we start a new record.
+    The proximity threshold is used as a secondary signal when fields don't collide.
     """
     if not field_matches:
         return []
@@ -153,28 +154,57 @@ def _group_matches_by_position(
     # Sort by position
     all_positions.sort(key=lambda x: x[0])
     
-    # Group matches that appear close together
+    # Calculate adaptive threshold based on observed gaps
+    # We want to group fields that belong together while separating different records
+    num_fields = len(field_matches)
+    if num_fields > 1:
+        # Calculate gaps between consecutive positions
+        gaps = []
+        for i in range(1, len(all_positions)):
+            gaps.append(all_positions[i][0] - all_positions[i-1][0])
+        
+        if gaps:
+            # Sort gaps to find a natural break point
+            sorted_gaps = sorted(gaps)
+            median_gap = sorted_gaps[len(sorted_gaps) // 2]
+            max_gap = sorted_gaps[-1]
+            
+            # Use a threshold that's higher than the median gap but reasonable
+            # This helps distinguish within-record gaps from between-record gaps
+            adaptive_threshold = min(max(median_gap * 3, proximity_threshold), max_gap * 0.8)
+            proximity_threshold = int(adaptive_threshold)
+    
+    # Group matches using field collision as primary signal
     records = []
     current_record: Dict[str, Any] = {}
-    current_start = all_positions[0][0]
+    last_pos = all_positions[0][0]
     
     for pos, field, text in all_positions:
-        # If this match is far from current record start, finalize current and start new
-        if pos - current_start > proximity_threshold and current_record:
-            # Fill missing fields with None
+        gap_from_last = pos - last_pos
+        should_start_new_record = False
+        
+        if current_record:
+            # PRIMARY SIGNAL: If we encounter a field we already have, start a new record
+            # This is the most reliable indicator of record boundaries
+            if field in current_record:
+                should_start_new_record = True
+            # SECONDARY SIGNAL: If gap from last position is very large, start new record
+            # But only if we have at least one field, to avoid splitting records too early
+            elif gap_from_last > proximity_threshold and len(current_record) >= num_fields:
+                should_start_new_record = True
+        
+        if should_start_new_record:
+            # Finalize current record
             complete_record = {f: current_record.get(f) for f in required_fields}
-            # Only keep records that have at least one non-None value
             if any(v is not None for v in complete_record.values()):
                 records.append(complete_record)
             current_record = {}
-            current_start = pos
         
         # Add to current record (first value for each field wins)
         if field not in current_record:
             current_record[field] = text
-            # Update start position if this is the first field in a new record
-            if len(current_record) == 1:
-                current_start = pos
+        
+        last_pos = pos
     
     # Don't forget the last record
     if current_record:
