@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class TaskQueue(Protocol):
     """Minimal queue abstraction to keep TaskService decoupled from Celery."""
 
-    def enqueue(self, task_name: str, args: list[Any]) -> None:  # pragma: no cover - protocol
+    def enqueue(self, task_name: str, args: list[Any], correlation_id: str | None = None) -> None:  # pragma: no cover - protocol
         ...
 
 
@@ -32,8 +32,9 @@ class CeleryTaskQueue:
         self.celery_app = celery_app
         self.queue_name = queue_name
 
-    def enqueue(self, task_name: str, args: list[Any]) -> None:
-        self.celery_app.send_task(task_name, args=args, queue=self.queue_name)
+    def enqueue(self, task_name: str, args: list[Any], correlation_id: str | None = None) -> None:
+        headers = {"correlation_id": correlation_id} if correlation_id else None
+        self.celery_app.send_task(task_name, args=args, queue=self.queue_name, headers=headers)
 
 
 class TaskNotFoundError(Exception):
@@ -52,7 +53,7 @@ class TaskService:
     queue: TaskQueue
     task_repo: TaskRepository
 
-    def create_task(self, url: str, prompt: str, owner_id: int) -> str:
+    def create_task(self, url: str, prompt: str, owner_id: int, correlation_id: str | None = None) -> str:
         """Create a task record and enqueue async processing."""
         task_id = str(uuid4())
         try:
@@ -71,6 +72,7 @@ class TaskService:
             self.queue.enqueue(
                 "scrape.process_request_full",
                 [task_id, url, prompt],
+                correlation_id=correlation_id,
             )
             logger.info("task_service.create_task.enqueued", extra={"task_id": task_id})
         except Exception as exc:  # noqa: BLE001

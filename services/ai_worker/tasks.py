@@ -1,25 +1,40 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from urllib.parse import urlparse
 
+from celery import current_task
 from shared.celery_app import celery_app
 from shared.database import SessionLocal
 import shared.database as db_utils
+from shared.correlation import bind_from_headers, get_correlation_id
+from shared.logging_utils import configure_logging
 from .input_sanitization import sanitize_user_input, InputSanitizationError
 from .intent_extraction import extract_intent
 from .llm_client import LLMClient
 from . import workflows
 from . import utils
 
+configure_logging(level=os.getenv("LOG_LEVEL", "INFO"))
+
 logger = logging.getLogger(__name__)
+
+
+def _bind_task_correlation_id() -> str:
+    try:
+        headers = getattr(current_task.request, "headers", None)
+    except Exception:
+        headers = None
+    return bind_from_headers(headers)
 
 @celery_app.task(name="scrape.process_request_full")
 def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
     """Entry point: Analyze intent and decide next steps."""
-    logger.info("ai.process_request_full.received", extra={"task_id": task_id, "url": url})
+    cid = _bind_task_correlation_id()
+    logger.info("ai.process_request_full.received", extra={"task_id": task_id, "url": url, "correlation_id": cid})
     
     db = SessionLocal()
     try:
@@ -58,9 +73,10 @@ def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
         celery_app.send_task(
             "scrape.fetch_page",
             args=[task_id, url, intent],
-            queue="fetching_queue"
+            queue="fetching_queue",
+            headers={"correlation_id": get_correlation_id()},
         )
-        logger.info("ai.process_request_full.delegated_fetch", extra={"task_id": task_id})
+        logger.info("ai.process_request_full.delegated_fetch", extra={"task_id": task_id, "correlation_id": cid})
         
         return {"task_id": task_id, "status": "IN_PROGRESS", "message": "Delegated to headless worker"}
 
@@ -95,7 +111,8 @@ def _normalize_fields(fields: List[str]) -> List[str]:
 @celery_app.task(name="scrape.process_content")
 def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_content: str, network: List, duration: int, started_iso: str, completed_iso: str):
     """Process fetched content: Universal Regex Pipeline for any content type."""
-    logger.info("ai.process_content.received", extra={"task_id": task_id})
+    cid = _bind_task_correlation_id()
+    logger.info("ai.process_content.received", extra={"task_id": task_id, "correlation_id": cid})
     db = SessionLocal()
     try:
         started = datetime.fromisoformat(started_iso)

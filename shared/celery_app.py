@@ -51,6 +51,13 @@ def _make_celery() -> Celery:
         task_track_started=True,
         task_time_limit=60 * 15,  # 15 minutes hard limit
         task_soft_time_limit=60 * 10,  # 10 minutes soft limit
+        task_publish_retry=True,
+        task_publish_retry_policy={
+            "max_retries": 3,
+            "interval_start": 0,
+            "interval_step": 0.5,
+            "interval_max": 2,
+        },
         task_routes={
             "services.headless_worker.tasks.*": {"queue": "fetching_queue"},
             "services.ai_worker.tasks.*": {"queue": "ai_queue"},

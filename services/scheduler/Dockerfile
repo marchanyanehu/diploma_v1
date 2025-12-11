@@ -1,4 +1,4 @@
-# Multi-stage build for AI worker (Celery)
+# Celery beat scheduler container
 FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -29,7 +29,6 @@ COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY . .
 
-# Non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown -R appuser:appuser /app
 USER appuser
@@ -37,4 +36,5 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python scripts/healthcheck_celery.py
 
-CMD ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "ai_queue"]
+CMD ["celery", "-A", "shared.celery_app.celery_app", "beat", "--loglevel=info"]
+

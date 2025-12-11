@@ -64,8 +64,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./:/app
     command: ["python", "-m", "uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     restart: unless-stopped
 
@@ -97,16 +95,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./:/app
     shm_size: 1gb
     restart: unless-stopped
     command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "fetching_queue"]
+    healthcheck:
+      test: ["CMD-SHELL", "python scripts/healthcheck_celery.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
 
   ai_worker:
     build:
       context: .
-      dockerfile: services/api/Dockerfile
+      dockerfile: services/ai_worker/Dockerfile
     container_name: diploma_ai_worker
     env_file:
       - .env
@@ -133,15 +135,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./:/app
     restart: unless-stopped
     command: ["celery", "-A", "shared.celery_app.celery_app", "worker", "--loglevel=info", "-Q", "ai_queue"]
+    healthcheck:
+      test: ["CMD-SHELL", "python scripts/healthcheck_celery.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
 
   scheduler:
     build:
       context: .
-      dockerfile: services/api/Dockerfile
+      dockerfile: services/scheduler/Dockerfile
     container_name: diploma_scheduler
     env_file:
       - .env
@@ -157,10 +163,14 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    volumes:
-      - ./:/app
     restart: unless-stopped
     command: ["celery", "-A", "shared.celery_app.celery_app", "beat", "--loglevel=info"]
+    healthcheck:
+      test: ["CMD-SHELL", "python scripts/healthcheck_celery.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
 
 volumes:
   postgres_data:

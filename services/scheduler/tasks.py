@@ -1,11 +1,16 @@
 
 import logging
+import os
 from datetime import datetime, timezone
 from sqlalchemy import or_
 from croniter import croniter
 from shared.celery_app import celery_app
 from shared.database import SessionLocal, ScheduledJob
 import shared.database as db_utils
+from shared.correlation import set_correlation_id, get_correlation_id
+from shared.logging_utils import configure_logging
+
+configure_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +19,8 @@ def check_due_jobs():
     """
     Periodic task to check for scheduled jobs that need to run.
     """
-    logger.info("Checking for due scheduled jobs...")
+    set_correlation_id()  # ensure correlation id exists for this beat tick
+    logger.info("Checking for due scheduled jobs...", extra={"correlation_id": get_correlation_id()})
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
@@ -26,7 +32,8 @@ def check_due_jobs():
         ).all()
         
         for job in jobs:
-            logger.info(f"Triggering job {job.id} ({job.url})")
+            cid = set_correlation_id(f"sch-{job.id}-{int(now.timestamp())}")
+            logger.info(f"Triggering job {job.id} ({job.url})", extra={"correlation_id": cid})
             
             # Calculate next run time
             try:
@@ -57,7 +64,8 @@ def check_due_jobs():
                 celery_app.send_task(
                     "scrape.process_request_full",
                     args=[task_id, str(job.url), job.prompt],
-                    queue="ai_queue"
+                    queue="ai_queue",
+                    headers={"correlation_id": cid},
                 )
                 
             except Exception as e:

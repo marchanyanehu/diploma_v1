@@ -21,6 +21,13 @@ RUN python -m pip install --upgrade pip \
 # Copy repository code
 COPY . /app
 
+# Use non-root user provided by Playwright base image
+USER pwuser
+
+# Healthcheck (Redis + optional Postgres)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python scripts/healthcheck_celery.py
+
 # Default environment values
 ENV REDIS_URL=redis://redis:6379/0 \
     CELERY_BROKER_URL=redis://redis:6379/0 \

@@ -35,6 +35,7 @@ import logging
 from importlib import util as _il_util
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from time import monotonic
 
 if _il_util.find_spec("litellm") is not None:  # pragma: no cover - simple availability check
     from litellm import completion  # type: ignore
@@ -111,9 +112,14 @@ class LLMClientConfig:
     temperature: float = 0.2
     max_tokens: Optional[int] = None
     log_payloads: bool = False
+    breaker_fail_threshold: int = 3
+    breaker_cooldown_s: int = 30
 
 
 class LLMClient:
+    # Simple in-memory circuit breaker per model to avoid hammering providers.
+    _breaker_state: Dict[str, Dict[str, float | int]] = {}
+
     def __init__(self, config: LLMClientConfig):
         self.config = config
         self.model_name = _resolve_model_name(config.provider, config.model)
@@ -185,6 +191,8 @@ class LLMClient:
         max_tokens = _clamp_max_tokens(provider, fallback_provider, max_tokens_raw)
 
         log_payloads = os.getenv("LLM_LOG_PAYLOADS", "false").lower() in {"1", "true", "yes"}
+        breaker_fail_threshold = int(os.getenv("LLM_BREAKER_FAIL_THRESHOLD", "3"))
+        breaker_cooldown_s = int(os.getenv("LLM_BREAKER_COOLDOWN_S", "30"))
         cfg = LLMClientConfig(
             provider=provider,
             model=model,
@@ -195,8 +203,43 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             log_payloads=log_payloads,
+            breaker_fail_threshold=breaker_fail_threshold,
+            breaker_cooldown_s=breaker_cooldown_s,
         )
         return cls(cfg)
+
+    @classmethod
+    def _breaker_key(cls, model_name: str) -> str:
+        return model_name
+
+    @classmethod
+    def _breaker_open(cls, model_name: str, threshold: int, cooldown_s: int) -> bool:
+        key = cls._breaker_key(model_name)
+        state = cls._breaker_state.get(key)
+        if not state:
+            return False
+        opened_at = state.get("opened_at", 0.0)
+        fail_count = int(state.get("fail_count", 0))
+        if fail_count < threshold:
+            return False
+        # If cooldown elapsed, allow half-open attempt
+        if monotonic() - float(opened_at) >= cooldown_s:
+            return False
+        return True
+
+    @classmethod
+    def _breaker_record_failure(cls, model_name: str) -> None:
+        key = cls._breaker_key(model_name)
+        state = cls._breaker_state.setdefault(key, {"fail_count": 0, "opened_at": 0.0})
+        state["fail_count"] = int(state.get("fail_count", 0)) + 1
+        if state["fail_count"] == 1:
+            state["opened_at"] = monotonic()
+        cls._breaker_state[key] = state
+
+    @classmethod
+    def _breaker_reset(cls, model_name: str) -> None:
+        key = cls._breaker_key(model_name)
+        cls._breaker_state.pop(key, None)
 
     def _extract_text_from_response(self, resp: Any) -> str:
         """Extract text content from LiteLLM/OpenAI-like response objects."""
@@ -252,6 +295,10 @@ class LLMClient:
 
         def _run_with_retries(model_name: str, label: str) -> str:
             last_exc: Exception | None = None
+
+            if self._breaker_open(model_name, self.config.breaker_fail_threshold, self.config.breaker_cooldown_s):
+                raise RuntimeError(f"{label} circuit open for {model_name}")
+
             for attempt in range(retry_count + 1):
                 try:
                     if self.config.log_payloads:
@@ -271,9 +318,11 @@ class LLMClient:
                             logger.debug("LLM response text (%s): %s", label, text)
                         except Exception:
                             logger.debug("LLM response logging skipped (unserializable)")
+                    self._breaker_reset(model_name)
                     return text
                 except Exception as exc:  # noqa: BLE001
                     last_exc = exc
+                    self._breaker_record_failure(model_name)
                     if attempt >= retry_count:
                         break
                     backoff = 0.5 * (attempt + 1)

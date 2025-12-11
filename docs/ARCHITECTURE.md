@@ -114,6 +114,103 @@ See `reference_docs/DB/data_dictionary.md` for full schema details and ER diagra
 | **PostgreSQL** | `diploma_postgres` | - | Data persistence |
 | **Redis** | `diploma_redis` | - | Task queue broker, rate limit storage |
 
+## API Contracts & Versioning
+
+- Public REST is versioned under `/api/v1/*`; OpenAPI is available at `/docs` (Swagger UI) and `/openapi.json` for contract sharing.
+- Exported snapshot lives at `docs/openapi.json` (regenerate: `python -c "from services.api.main import app; import json, pathlib; pathlib.Path('docs/openapi.json').write_text(json.dumps(app.openapi(), indent=2), encoding='utf-8')"`)
+- Async contracts between services are Celery tasks with explicit queues: `ai_queue` for AI Worker, `fetching_queue` for Headless Worker; scheduler publishes to `ai_queue`.
+- Health/readiness endpoints: `/health` (liveness) and `/api/v1/health` (liveness + DB check).
+
+## Domain Model & Bounded Contexts
+
+- **Orchestration (API)**: Users, auth, task lifecycle, schedule CRUD. Owns user auth data and task headers.
+- **Fetching (Headless Worker)**: Responsible for acquiring page content and semantic text. Writes task source blobs and network traces.
+- **Extraction (AI Worker)**: Owns intent parsing, extraction results, and parser cache (regexes, samples, usage counters).
+- **Scheduling (Scheduler)**: Owns scheduled jobs and next-run bookkeeping.
+
+> Data storage: A single Postgres instance is used with explicitly owned tables per context to keep operational complexity low for the thesis scope. Each context writes only its own tables; cross-context access is via service APIs/messages (Celery queues). This is an intentional deviation from “DB per service” and documented trade-off; future work is to split schemas or instances when scale justifies it.
+
+### Domain ER Diagram (owned tables per context)
+
+```mermaid
+erDiagram
+    USERS ||--o{ SCRAPING_TASKS : "user_id"
+    USERS ||--o{ SCHEDULED_JOBS : "user_id"
+    SCRAPING_TASKS ||--o{ SCHEDULED_JOBS : "creates"
+    SCRAPING_TASKS ||--o{ PARSER_CACHE : "reuses regex (by domain/keywords)"
+    USERS {
+        uuid id
+        string username
+        string hashed_password
+        string email
+    }
+    SCRAPING_TASKS {
+        uuid id
+        uuid user_id
+        text url
+        text prompt
+        jsonb intent
+        text status
+    }
+    SCHEDULED_JOBS {
+        uuid id
+        uuid user_id
+        uuid task_id
+        text schedule_cron
+        timestamptz next_run_at
+    }
+    PARSER_CACHE {
+        uuid id
+        text domain
+        text keywords
+        text regex
+        float confidence
+    }
+```
+
+## Resilience & Error Handling (minimal baseline)
+
+- Celery task limits: soft 10m / hard 15m; publish retries with backoff to protect the broker.
+- External calls: LLM and Playwright timeouts are configurable via env; task retries inherit Celery backoff.
+- Degradation: if Postgres is down, `/api/v1/health` reports `database.disconnected`; API returns clear 5xx with error body. If broker is down, enqueuing fails fast with logged correlation id; clients receive an error instead of hanging.
+- Rate limits: API uses `slowapi` to guard endpoints; Redis stores counters.
+
+## Deployment Diagram
+
+```mermaid
+graph LR
+  subgraph Network
+    API[diploma_api :8000]
+    HW[diploma_headless_worker]
+    AI[diploma_ai_worker]
+    SCHED[diploma_scheduler]
+    REDIS[(Redis 7)]
+    PG[(PostgreSQL 15)]
+  end
+
+  Client -->|HTTP| API
+  API -->|Celery tasks\nai_queue| AI
+  AI -->|Celery tasks\nfetching_queue| HW
+  SCHED -->|Celery beat\nai_queue| AI
+
+  API --- REDIS
+  AI --- REDIS
+  HW --- REDIS
+  SCHED --- REDIS
+
+  API --- PG
+  AI --- PG
+  HW --- PG
+  SCHED --- PG
+```
+
+## Operational Features
+
+- **Health checks**: API exposes `/health` and `/api/v1/health`; workers and scheduler include container health checks that ping Redis (and Postgres when configured).
+- **Correlation IDs**: Incoming requests accept/emit `X-Correlation-Id`; the ID is propagated through Celery headers so logs across API, workers, and scheduler can be stitched.
+- **Images per service**: Dedicated Dockerfiles for API, AI worker, headless worker, and scheduler with non-root users and slim bases.
+- **Timeouts / retries**: Celery tasks enforce soft/hard time limits (10m/15m) and broker publish retries with backoff. API uses request-level rate limits; OS/network timeouts for LLM/Playwright are configurable via env.
+
 ## Technology Stack
 
 | Component | Technology | Version |

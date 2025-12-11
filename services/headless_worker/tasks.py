@@ -10,8 +10,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from celery import current_task
 from playwright.async_api import async_playwright, Page
 from shared.celery_app import celery_app
+from shared.correlation import bind_from_headers, get_correlation_id
+from shared.logging_utils import configure_logging
+
+configure_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,14 @@ if (originalQuery) {
   );
 }
 """
+
+
+def _bind_task_correlation_id() -> str:
+    try:
+        headers = getattr(current_task.request, "headers", None)
+    except Exception:
+        headers = None
+    return bind_from_headers(headers)
 
 async def _extract_semantic_content(page: Page) -> str:
     """
@@ -381,13 +394,14 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, str, list[dict[
 @celery_app.task(name="scrape.fetch_page")
 def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
     """Fetch page content using Playwright and trigger AI processing."""
-    logger.info("headless.fetch_page.received", extra={"task_id": task_id, "url": url})
+    cid = _bind_task_correlation_id()
+    logger.info("headless.fetch_page.received", extra={"task_id": task_id, "url": url, "correlation_id": cid})
     
     try:
         # Execute async playwright in sync task
         inner_text, semantic_text, html_content, network, duration, started, completed = asyncio.run(_async_browse_and_capture(url))
         
-        logger.info("headless.fetch_page.captured", extra={"task_id": task_id, "text_bytes": len(inner_text), "semantic_bytes": len(semantic_text)})
+        logger.info("headless.fetch_page.captured", extra={"task_id": task_id, "text_bytes": len(inner_text), "semantic_bytes": len(semantic_text), "correlation_id": cid})
         
         # Trigger next step: AI Processing
         celery_app.send_task(
@@ -403,9 +417,10 @@ def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
                 started.isoformat(), 
                 completed.isoformat()
             ],
-            queue="ai_queue"
+            queue="ai_queue",
+            headers={"correlation_id": get_correlation_id()},
         )
-        logger.info("headless.fetch_page.delegated_to_ai", extra={"task_id": task_id})
+        logger.info("headless.fetch_page.delegated_to_ai", extra={"task_id": task_id, "correlation_id": cid})
         
         return {"status": "SUCCESS", "message": "Fetched and delegated"}
         

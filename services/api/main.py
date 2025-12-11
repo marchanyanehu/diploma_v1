@@ -14,6 +14,7 @@ import uvicorn
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, cast, List
 import logging
+from uuid import uuid4
 
 # Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -26,6 +27,7 @@ from services.ai_worker.input_sanitization import sanitize_user_input, InputSani
 # Import database components
 from shared.database import get_db, create_tables, ScrapingTask, ParserCache, User
 from shared.config import settings
+from shared.correlation import set_correlation_id, get_correlation_id, correlation_extra
 from .logging_config import setup_logging
 from .error_handlers import register_error_handlers
 from . import schemas
@@ -142,6 +144,17 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
+
+# Correlation ID middleware: accepts inbound X-Correlation-Id or generates one,
+# stores it in request.state and propagates to responses and logs.
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    inbound_cid = request.headers.get("X-Correlation-Id") or request.headers.get("Correlation-Id")
+    cid = set_correlation_id(inbound_cid)
+    request.state.correlation_id = cid
+    response = await call_next(request)
+    response.headers["X-Correlation-Id"] = cid
+    return response
 
 # Add CORS middleware
 app.add_middleware(
@@ -411,7 +424,13 @@ async def process_request(
         "api.process_request.received",
         extra={"url": str(scrape_request.url), "user": current_user.username},
     )
-    task_id = task_service.create_task(str(scrape_request.url), sanitized_prompt, current_user.id)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    task_id = task_service.create_task(
+        str(scrape_request.url),
+        sanitized_prompt,
+        current_user.id,
+        correlation_id=correlation_id,
+    )
     resp = schemas.TaskResponse(
         task_id=task_id,
         status=schemas.TaskStatus.PENDING,
