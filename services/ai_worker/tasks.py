@@ -131,8 +131,56 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 used_cached = True
             if extracted_data:
                 utils.log_event(task_id, "schema_extraction_complete", count=len(extracted_data))
+                
+                # Quality check: for multi-field extraction (like products), 
+                # if we only got 1-2 records, it's likely wrong (e.g., page title instead of products)
+                if is_multi_field and len(extracted_data) <= 2:
+                    utils.log_event(task_id, "schema_extraction_low_count", 
+                                  count=len(extracted_data),
+                                  reason="Too few records for product listing, will try alternatives")
+                    extracted_data = []  # Reset to try other methods
 
-        # 3. Universal Extraction Pipeline
+        # 3. NEW: Try simplified extraction strategies first (combined regex or direct LLM)
+        # These avoid the complex position-based grouping logic
+        if not extracted_data and is_multi_field:
+            from . import extraction_strategies
+            
+            field_keywords = keywords
+            utils.log_event(task_id, "trying_simplified_extraction", fields=field_keywords)
+            
+            strategy_result = extraction_strategies.unified_extract(
+                html=html_content,
+                fields=field_keywords,
+                llm=llm,
+                task_id=task_id
+            )
+            
+            if strategy_result.get("success") and strategy_result.get("records"):
+                utils.log_event(task_id, "simplified_extraction_success", 
+                              strategy=strategy_result.get("strategy_used"),
+                              count=len(strategy_result["records"]))
+                # Convert to expected format
+                extracted_data = []
+                for record in strategy_result["records"]:
+                    filtered_record = {k: v for k, v in record.items() if v is not None}
+                    if filtered_record:
+                        text_repr = " | ".join(f"{k}: {v}" for k, v in filtered_record.items())
+                        extracted_data.append({
+                            "text": text_repr,
+                            "fields": record,
+                            "source": f"strategy_{strategy_result.get('strategy_used', 'unknown')}",
+                            "confidence": 0.85
+                        })
+            elif strategy_result.get("quality_issue"):
+                utils.log_event(task_id, "simplified_extraction_quality_fail", 
+                              error=strategy_result.get("error"),
+                              match_count=strategy_result.get("match_count"))
+                # Will fallback to per-field extraction below
+            else:
+                utils.log_event(task_id, "simplified_extraction_failed", 
+                              error=strategy_result.get("error"))
+
+        # 4. Universal Extraction Pipeline (fallback to original per-field approach)
         if not extracted_data:
             utils.log_event(task_id, "step_1_inner_text_ready", length=len(text_content))
             
