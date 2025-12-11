@@ -276,21 +276,23 @@ SCHEMA_EXTRACTION_USER_TEMPLATE = """Extract records with these fields: {fields_
 PAGE CONTENT:
 {content_snippet}
 
-INSTRUCTIONS:
-1. Find ALL records/items that contain the requested fields
-2. Look for REPEATING structures (product cards, list items, table rows, etc.)
-3. Extract EXACT text values as they appear
-4. If a field is empty/missing for an item, use ""
-5. Return ALL matching items, not just a few
-6. Skip navigation menus, headers, footers, sidebars
+CRITICAL INSTRUCTIONS:
+1. Find ALL records/items that contain the requested fields - THIS IS A PRODUCT LISTING PAGE
+2. Look for REPEATING structures (product cards, list items, article tags, divs with product data)
+3. Extract EVERY SINGLE product you can find - aim for 20-30+ items if they exist
+4. Do NOT stop after finding just a few items - scroll through all the content
+5. Extract EXACT text values as they appear (titles, prices, etc.)
+6. If a field is empty/missing for an item, use ""
+7. Skip navigation menus, headers, footers, sidebars - focus ONLY on product listings
 
-Output format - JSON array:
+Output format - JSON with "items" array containing ALL products:
 {{"items": [
-  {{"field1": "value1", "field2": "value2"}},
-  {{"field1": "value3", "field2": "value4"}},
-  ...
+  {{"title": "Product 1", "price": "10€"}},
+  {{"title": "Product 2", "price": "20€"}},
+  ... (continue with ALL remaining products)
 ]}}
 
+REMINDER: Extract ALL products, not just 5-10. If you see 25 products, return all 25.
 Return ONLY valid JSON."""
 
 # ---------------------------------------------------------------------------

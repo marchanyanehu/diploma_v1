@@ -43,7 +43,163 @@ if (originalQuery) {
 }
 """
 
-async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, Any]], int, datetime, datetime]:
+async def _extract_semantic_content(page: Page) -> str:
+    """
+    Extract semantic content including visible text, buttons, links, images (alt text),
+    and other interactive elements to provide richer context than plain innerText.
+    """
+    script = """
+    () => {
+        const elements = [];
+        
+        // Helper to check if element is visible
+        function isVisible(el) {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && 
+                   style.visibility !== 'hidden' && 
+                   style.opacity !== '0' &&
+                   el.offsetWidth > 0 && 
+                   el.offsetHeight > 0;
+        }
+        
+        // Extract text content with context markers
+        function extractText(el, prefix = '') {
+            if (!isVisible(el)) return null;
+            
+            const tag = el.tagName.toLowerCase();
+            let text = '';
+            
+            // Links
+            if (tag === 'a') {
+                const href = el.getAttribute('href') || '';
+                const linkText = el.innerText.trim();
+                if (linkText) {
+                    text = `[LINK: ${linkText}]`;
+                    if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                        text += ` (${href})`;
+                    }
+                }
+            }
+            // Buttons
+            else if (tag === 'button' || el.getAttribute('role') === 'button') {
+                const btnText = el.innerText.trim() || el.getAttribute('aria-label') || '';
+                if (btnText) text = `[BUTTON: ${btnText}]`;
+            }
+            // Images
+            else if (tag === 'img') {
+                const alt = el.getAttribute('alt') || '';
+                const title = el.getAttribute('title') || '';
+                if (alt) text = `[IMAGE: ${alt}]`;
+                else if (title) text = `[IMAGE: ${title}]`;
+            }
+            // Input fields
+            else if (tag === 'input') {
+                const type = el.getAttribute('type') || 'text';
+                const placeholder = el.getAttribute('placeholder') || '';
+                const label = el.getAttribute('aria-label') || '';
+                const value = el.value || '';
+                
+                if (type === 'submit' || type === 'button') {
+                    text = `[BUTTON: ${value || label || 'Submit'}]`;
+                } else if (placeholder) {
+                    text = `[INPUT: ${placeholder}]`;
+                } else if (label) {
+                    text = `[INPUT: ${label}]`;
+                }
+            }
+            // Select dropdowns
+            else if (tag === 'select') {
+                const label = el.getAttribute('aria-label') || 
+                             el.previousElementSibling?.innerText?.trim() || '';
+                const options = Array.from(el.options)
+                    .filter(opt => opt.text.trim())
+                    .map(opt => opt.text.trim())
+                    .slice(0, 5); // First 5 options
+                if (label || options.length) {
+                    text = `[SELECT: ${label}`;
+                    if (options.length) text += ` - Options: ${options.join(', ')}`;
+                    text += ']';
+                }
+            }
+            // Headings (preserve structure)
+            else if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+                const headingText = el.innerText.trim();
+                if (headingText) text = `\\n## ${headingText}\\n`;
+            }
+            // Lists
+            else if (tag === 'li') {
+                const listText = el.innerText.trim();
+                if (listText) text = `• ${listText}`;
+            }
+            // Table cells (preserve data structure)
+            else if (tag === 'td' || tag === 'th') {
+                const cellText = el.innerText.trim();
+                if (cellText) text = cellText + ' | ';
+            }
+            // Labels
+            else if (tag === 'label') {
+                const labelText = el.innerText.trim();
+                if (labelText) text = `[LABEL: ${labelText}]`;
+            }
+            // ARIA labels and roles
+            else {
+                const ariaLabel = el.getAttribute('aria-label');
+                const role = el.getAttribute('role');
+                if (ariaLabel && ['menuitem', 'tab', 'option'].includes(role)) {
+                    text = `[${role.toUpperCase()}: ${ariaLabel}]`;
+                }
+            }
+            
+            return text;
+        }
+        
+        // Walk the DOM and extract semantic content
+        function walk(node) {
+            if (!node || node.nodeType !== 1) return;
+            
+            // Skip scripts, styles, and hidden elements
+            const tag = node.tagName.toLowerCase();
+            if (['script', 'style', 'noscript', 'iframe'].includes(tag)) return;
+            if (!isVisible(node)) return;
+            
+            // Extract semantic content for this node
+            const text = extractText(node);
+            if (text) elements.push(text);
+            
+            // For nodes without special handling, just get innerText if it's a leaf
+            if (!text && node.children.length === 0) {
+                const innerText = node.innerText?.trim();
+                if (innerText && innerText.length > 0 && innerText.length < 200) {
+                    elements.push(innerText);
+                }
+            }
+            
+            // Recurse into children only if we didn't extract special content
+            if (!text || ['div', 'section', 'article', 'nav', 'main', 'header', 'footer'].includes(tag)) {
+                for (const child of node.children) {
+                    walk(child);
+                }
+            }
+        }
+        
+        walk(document.body);
+        return elements.filter(e => e && e.trim()).join('\\n');
+    }
+    """
+    
+    try:
+        semantic_content = await page.evaluate(script)
+        return semantic_content or ""
+    except Exception as e:
+        logger.warning(f"Failed to extract semantic content: {e}")
+        # Fallback to innerText
+        try:
+            return await page.eval_on_selector("body", "el => el.innerText")
+        except Exception:
+            return ""
+
+async def _async_browse_and_capture(url: str) -> tuple[str, str, str, list[dict[str, Any]], int, datetime, datetime]:
     started = datetime.now(timezone.utc)
     network_events: list[dict[str, Any]] = []
     
@@ -169,18 +325,22 @@ async def _async_browse_and_capture(url: str) -> tuple[str, str, list[dict[str, 
             # Get visible text (innerText of body)
             inner_text = await page.eval_on_selector("body", "el => el.innerText")
             
+            # Extract semantic content (text + interactive elements)
+            semantic_text = await _extract_semantic_content(page)
+            
         except Exception as e:
             logger.error(f"Playwright navigation error: {e}")
             # Return partial data if possible
             content = await page.content() if 'page' in locals() else ""
             inner_text = ""
+            semantic_text = ""
             raise e
         finally:
             await browser.close()
             
     completed = datetime.now(timezone.utc)
     duration = int((completed - started).total_seconds())
-    return inner_text, content, network_events, duration, started, completed
+    return inner_text, semantic_text, content, network_events, duration, started, completed
 
 @celery_app.task(name="scrape.fetch_page")
 def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
@@ -189,9 +349,9 @@ def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
     
     try:
         # Execute async playwright in sync task
-        inner_text, html_content, network, duration, started, completed = asyncio.run(_async_browse_and_capture(url))
+        inner_text, semantic_text, html_content, network, duration, started, completed = asyncio.run(_async_browse_and_capture(url))
         
-        logger.info("headless.fetch_page.captured", extra={"task_id": task_id, "bytes": len(inner_text)})
+        logger.info("headless.fetch_page.captured", extra={"task_id": task_id, "text_bytes": len(inner_text), "semantic_bytes": len(semantic_text)})
         
         # Trigger next step: AI Processing
         celery_app.send_task(
@@ -200,7 +360,7 @@ def fetch_page(task_id: str, url: str, intent: Dict[str, Any]):
                 task_id, 
                 url, 
                 intent, 
-                inner_text, 
+                semantic_text,  # Use semantic text instead of plain inner_text
                 html_content, 
                 network, 
                 duration, 

@@ -97,124 +97,33 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         # Determine extraction mode
         keywords = intent.get("keywords", [])
         is_multi_field = len(keywords) > 1
-        is_attribute_target = intent.get("is_attribute", False)
         schema_fields = intent.get("schema_fields", [])
         
         extracted_data = []
         used_parser = None
         used_cached = False
         
-        # 1. Check Cache
+        # 1. Try cache first
         cache_result = workflows.check_cached_parser(db, domain, keywords, search_content)
         if cache_result["matches"]:
-            # If schema extraction is requested, ensure we don't use a CONTENT parser
-            parser = cache_result["used_parser"]
-            if schema_fields and parser and parser.source_type != "SCHEMA":
-                utils.log_event(task_id, "cache_hit_ignored_type_mismatch", expected="SCHEMA", found=parser.source_type)
-            else:
-                extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
-                used_parser = parser
-                used_cached = True
-                if used_parser:
-                    try:
-                        db_utils.update_parser_usage(db, used_parser.id)
-                    except Exception as e:
-                        utils.log_event(task_id, "update_parser_usage_failed", error=str(e))
+            extracted_data = [{"text": m, "source": "cached_regex", "confidence": 1.0} for m in cache_result["matches"]]
+            used_parser = cache_result["used_parser"]
+            used_cached = True
+            utils.log_event(task_id, "cache_hit", count=len(extracted_data))
         
-        # 2. Schema Extraction (if requested and no cache hit)
-        if not extracted_data and schema_fields:
-            utils.log_event(task_id, "using_schema_extraction", fields=schema_fields)
-            extracted_data, schema_used_cache = workflows.run_schema_extraction_with_cache(
-                task_id, url, schema_fields, inner_text, html_content, llm, db, domain
-            )
-            if schema_used_cache:
-                used_cached = True
-            if extracted_data:
-                utils.log_event(task_id, "schema_extraction_complete", count=len(extracted_data))
-                
-                # Quality check: for multi-field extraction (like products), 
-                # if we only got 1-2 records, it's likely wrong (e.g., page title instead of products)
-                if is_multi_field and len(extracted_data) <= 2:
-                    utils.log_event(task_id, "schema_extraction_low_count", 
-                                  count=len(extracted_data),
-                                  reason="Too few records for product listing, will try alternatives")
-                    extracted_data = []  # Reset to try other methods
-
-        # 3. NEW: Try simplified extraction strategies first (combined regex or direct LLM)
-        # These avoid the complex position-based grouping logic
-        if not extracted_data and is_multi_field:
-            from . import extraction_strategies
-            
-            field_keywords = keywords
-            utils.log_event(task_id, "trying_simplified_extraction", fields=field_keywords)
-            
-            strategy_result = extraction_strategies.unified_extract(
-                html=html_content,
-                fields=field_keywords,
-                llm=llm,
-                task_id=task_id
-            )
-            
-            if strategy_result.get("success") and strategy_result.get("records"):
-                utils.log_event(task_id, "simplified_extraction_success", 
-                              strategy=strategy_result.get("strategy_used"),
-                              count=len(strategy_result["records"]))
-                # Convert to expected format
-                extracted_data = []
-                for record in strategy_result["records"]:
-                    filtered_record = {k: v for k, v in record.items() if v is not None}
-                    if filtered_record:
-                        text_repr = " | ".join(f"{k}: {v}" for k, v in filtered_record.items())
-                        extracted_data.append({
-                            "text": text_repr,
-                            "fields": record,
-                            "source": f"strategy_{strategy_result.get('strategy_used', 'unknown')}",
-                            "confidence": 0.85
-                        })
-            elif strategy_result.get("quality_issue"):
-                utils.log_event(task_id, "simplified_extraction_quality_fail", 
-                              error=strategy_result.get("error"),
-                              match_count=strategy_result.get("match_count"))
-                # Will fallback to per-field extraction below
-            else:
-                utils.log_event(task_id, "simplified_extraction_failed", 
-                              error=strategy_result.get("error"))
-
-        # 4. Universal Extraction Pipeline (fallback to original per-field approach)
+        # 2. Try direct LLM extraction (simple and effective)
         if not extracted_data:
-            utils.log_event(task_id, "step_1_inner_text_ready", length=len(text_content))
-            
-            # Step 2: Find matching text
-            matched_texts = workflows.step2_find_matching_text(
-                task_id, text_content, intent, is_multi_field, is_attribute_target, keywords, llm
-            )
-            utils.log_event(task_id, "step_2_complete", count=len(matched_texts), samples=matched_texts[:3])
-            
-            if is_attribute_target:
-                extracted_data = workflows.run_attribute_extraction(
-                    task_id, url, intent, matched_texts, html_content, llm, db
+            if schema_fields:
+                # Schema-based extraction
+                utils.log_event(task_id, "schema_extraction", fields=schema_fields)
+                extracted_data = workflows.run_schema_extraction(
+                    task_id, url, schema_fields, inner_text, html_content, llm
                 )
-            
-            # Use unified field extraction for both single and multi-field
-            if not extracted_data:
-                utils.log_event(task_id, "field_extraction_start", is_multi_field=is_multi_field)
-                
-                # For single field, use the target as the field name
-                if not is_multi_field:
-                    field_keywords = [intent.get("target", "value")]
-                else:
-                    field_keywords = keywords
-                
-                extracted_data = workflows.run_multi_field_extraction(
-                    task_id=task_id,
-                    keywords=field_keywords,
-                    example_texts=matched_texts,
-                    search_content=search_content,
-                    snippet_to_use=search_content[:32000],
-                    llm=llm,
-                    url=url,
-                    db=db,
-                    intent=intent
+            else:
+                # Field-based extraction
+                utils.log_event(task_id, "field_extraction", fields=keywords)
+                extracted_data = workflows.run_field_extraction(
+                    task_id, url, keywords, inner_text, html_content, llm, db, domain
                 )
 
         # Persist Results
