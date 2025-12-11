@@ -70,72 +70,9 @@ def get_scraping_task(db: Session, task_id: str) -> Optional[ScrapingTask]:
     return db.query(ScrapingTask).filter(ScrapingTask.task_id == task_id).first()
 
 
-def create_parser_cache(
-    db: Session,
-    url_pattern: str,
-    domain: str,
-    user_intent: str,
-    generated_regex: str,
-    source_type: str,
-    created_by_task_id: str,
-    test_matches_count: int
-) -> ParserCache:
-    """Create a new parser cache entry."""
-    # Get or create the domain record
-    domain_record = get_or_create_domain(db, domain)
-    
-    parser = ParserCache(
-        url_pattern=url_pattern,
-        domain_id=domain_record.id,
-        user_intent=user_intent,
-        generated_regex=generated_regex,
-        source_type=source_type,
-        created_by_task_id=created_by_task_id,
-        test_matches_count=test_matches_count
-    )
-    db.add(parser)
-    db.commit()
-    db.refresh(parser)
-    logger.info(f"Created parser cache for domain: {domain}")
-    return parser
-
-
-def find_cached_parser(
-    db: Session,
-    domain: str,
-    keywords: Iterable[str] | None = None,
-    confidence_threshold: int = 70,
-    limit: int = 3,
-) -> List[ParserCache]:
-    """Find candidate cached parsers for a domain filtered by keyword overlap.
-    
-    Returns multiple candidates (ordered best-first) so caller can choose.
-    """
-    # Join with domains table to filter by domain name
-    q = (
-        db.query(ParserCache)
-        .join(Domain, ParserCache.domain_id == Domain.id)
-        .filter(
-            Domain.name == domain,
-            ParserCache.confidence_score >= confidence_threshold,
-            ParserCache.is_active == True,  # noqa: E712
-        )
-        .order_by(ParserCache.confidence_score.desc(), ParserCache.last_used_at.desc().nullslast())
-    )
-    parsers = list(q.limit(limit))
-    if keywords:
-        kw_low = {k.lower() for k in keywords if k}
-        scored: List[tuple[int, int, ParserCache]] = []
-        for p in parsers:
-            p_kws = {k.lower() for k in (p.keyword_set or p.intent_keywords or [])}
-            overlap = len(kw_low & p_kws)
-            # tie-breaker: Jaccard similarity * 1000
-            jacc = int((overlap / len(p_kws)) * 1000) if p_kws else 0
-            scored.append((overlap, jacc, p))
-        scored.sort(key=lambda t: (-t[0], -t[1], -t[2].confidence_score))
-        filtered = [p for ov, _, p in scored if ov > 0]
-        return filtered or [p for _, _, p in scored]
-    return parsers
+# Old caching functions removed - now using field-based caching:
+# - create_parser_cache -> create_parser_cache_by_fields
+# - find_cached_parser -> find_cached_parser_by_fields
 
 
 def update_task_status(
@@ -296,72 +233,7 @@ def persist_extraction_result(
     db.commit()
 
 
-def record_new_parser(
-    db: Session,
-    *,
-    task_id: str,
-    url: str,
-    intent: Dict[str, Any],
-    pattern: str,
-    flags: str,
-    matches_count: int,
-    source_type: str,
-    sample_input: str | None,
-    sample_output: List[Dict[str, Any]] | None,
-) -> Optional[ParserCache]:
-    """Create a new ParserCache entry if pattern seems valid.
-    
-    Uses normalized tables: Domain for domain lookup, ParserSample for sample data.
-    """
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        domain_name = parsed.netloc
-        
-        # Get or create domain record
-        domain_record = get_or_create_domain(db, domain_name)
-        
-        # Compose final stored regex (embed flags inline if provided)
-        if flags:
-            stored_regex = f"(?{flags}:{pattern})"
-        else:
-            stored_regex = pattern
-        
-        parser = ParserCache(
-            url_pattern=url,
-            domain_id=domain_record.id,
-            user_intent=intent.get("target", intent.get("original_input", ""))[:255],
-            intent_keywords=intent.get("keywords", [])[:25],
-            target_data_type=intent.get("target", "")[:100],
-            normalized_intent_hash=hashlib.sha1("|".join(sorted([intent.get("target", ""), *(intent.get("keywords", []) or [])])).encode("utf-8")).hexdigest(),
-            keyword_set=sorted({k.lower() for k in (intent.get("keywords") or []) if k})[:50],
-            generated_regex=stored_regex,
-            source_type=source_type,
-            source_identifier=url,
-            test_matches_count=matches_count,
-            created_by_task_id=task_id,
-            confidence_score=100,
-            success_rate=100,
-        )
-        db.add(parser)
-        db.flush()  # Get the parser ID
-        
-        # Create sample record in ParserSample table if sample data provided
-        if sample_input or sample_output:
-            sample = ParserSample(
-                parser_id=parser.id,
-                sample_input=(sample_input or "")[:5000],
-                sample_output=sample_output[:10] if sample_output else None
-            )
-            db.add(sample)
-        
-        db.commit()
-        db.refresh(parser)
-        return parser
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to create parser cache: %s", e)
-        db.rollback()
-        return None
+# record_new_parser removed - now using create_parser_cache_by_fields for field-based caching
 
 
 def get_all_tasks(db: Session, limit: int = 10) -> List[ScrapingTask]:

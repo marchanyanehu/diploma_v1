@@ -134,7 +134,7 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
                 # Field-based extraction
                 utils.log_event(task_id, "field_extraction", fields=keywords)
                 extracted_data = workflows.run_field_extraction(
-                    task_id, url, keywords, inner_text, html_content, llm, db, domain
+                    task_id, url, keywords, inner_text, html_content, llm, db, domain, url_pattern
                 )
 
         # Persist Results

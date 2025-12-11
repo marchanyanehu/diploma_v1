@@ -51,7 +51,7 @@ def check_cached_parser(
                 if set(fields).issubset(matched_fields):
                     try:
                         db_utils.update_parser_usage(db, p.id)
-                        log_event("cache_hit", parser_id=p.id, domain=domain, fields=fields)
+                        logger.info(f"Cache hit: parser_id={p.id}, domain={domain}, fields={fields}")
                     except Exception:
                         pass
                     return {
@@ -61,8 +61,7 @@ def check_cached_parser(
                     }
         
         # Cache invalid - invalidate and remove
-        log_event("cache_invalid", parser_id=p.id, domain=domain, 
-                 match_count=len(matches) if matches else 0)
+        logger.info(f"Cache invalid: parser_id={p.id}, domain={domain}, match_count={len(matches) if matches else 0}")
         try:
             db_utils.invalidate_parser(db, p.id)
         except Exception as e:
@@ -256,9 +255,10 @@ def _cache_regex_from_extraction(
 
 def run_field_extraction(
     task_id: str, url: str, keywords: List[str],
-    inner_text: str, html_content: str, llm: LLMClient, db, domain: str
+    inner_text: str, html_content: str, llm: LLMClient, db, domain: str,
+    url_pattern: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Simple field extraction using regex generation."""
+    """Simple field extraction using regex generation with field-based caching."""
     search_content = html_content if html_content else inner_text
     
     # Ask LLM to find examples first
@@ -306,33 +306,42 @@ CONTENT:
         
         # Generate regex
         result = regex_generation.iterative_regex_generation(
-            task_id=task_id,
-            target_description=field,
+            source=search_content,
             examples=field_examples,
-            snippet=snippet,
+            target_desc=field,
             llm=llm,
+            snippet=snippet,
             max_iterations=2
         )
         
         if result.get("success"):
             pattern = result["final_pattern"]
-            flags = result.get("flags", "s")
+            flags = result.get("final_flags", "s")
             matches_with_pos = _get_matches_with_positions(pattern, flags, search_content)
             
             if matches_with_pos:
                 log_event(task_id, "field_regex_success", field=field, count=len(matches_with_pos))
                 all_matches.extend([{"text": m[0], "field": field, "source": "regex"} for m in matches_with_pos])
                 
-                # Cache the regex
-                try:
-                    db_utils.record_new_parser(
-                        db, task_id, url, {"keywords": [field]},
-                        f"(?{flags}:{pattern})", flags, len(matches_with_pos),
-                        "CONTENT", snippet[:2000],
-                        [{"text": m[0]} for m in matches_with_pos[:5]]
-                    )
-                except Exception:
-                    pass
+                # Cache the regex using field-based caching
+                if db and domain:
+                    try:
+                        stored_regex = f"(?{flags}){pattern}" if flags else pattern
+                        db_utils.create_parser_cache_by_fields(
+                            db=db,
+                            domain=domain,
+                            fields=[field],
+                            generated_regex=stored_regex,
+                            source_type="SEMANTIC",
+                            created_by_task_id=task_id,
+                            test_matches_count=len(matches_with_pos),
+                            confidence_score=85,
+                            url_pattern=url_pattern,
+                            sample_input=snippet[:2000],
+                            sample_output=[{"text": m[0]} for m in matches_with_pos[:10]]
+                        )
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to cache field regex: {cache_err}")
     
     if all_matches:
         log_event(task_id, "field_extraction_success", count=len(all_matches))

@@ -34,12 +34,10 @@ def test_process_content_optimized_flow(mock_workflows_db_utils, mock_db_utils, 
     duration = 1
     now_iso = datetime.now(timezone.utc).isoformat()
     
-    # Mock find_cached_parser to return empty (force generation)
-    # Note: check_cached_parser is in workflows, so we need to mock db_utils there too or mock check_cached_parser
-    mock_workflows_db_utils.find_cached_parser.return_value = []
+    # Mock find_cached_parser_by_fields to return empty (force generation)
+    mock_workflows_db_utils.find_cached_parser_by_fields.return_value = []
     
     # Mock regex generation result
-    # We need to patch where it is used: services.ai_worker.workflows.regex_generation
     with patch('services.ai_worker.workflows.regex_generation.iterative_regex_generation') as mock_gen:
         mock_gen.return_value = {
             "success": True,
@@ -58,8 +56,8 @@ def test_process_content_optimized_flow(mock_workflows_db_utils, mock_db_utils, 
         assert call_kwargs["snippet"] 
         
         mock_db_utils.persist_extraction_result.assert_called_once()
-        # record_new_parser is called in workflows, so it uses workflows.db_utils
-        mock_workflows_db_utils.record_new_parser.assert_called_once()
+        # Field-based caching now uses create_parser_cache_by_fields
+        mock_workflows_db_utils.create_parser_cache_by_fields.assert_called_once()
 
 def test_find_candidates():
     html = "<div>abc</div><div>def</div><div>abc again</div>"
