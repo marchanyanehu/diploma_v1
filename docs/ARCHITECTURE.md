@@ -8,7 +8,7 @@ graph TD
     API -->|Auth & Tasks| DB[(PostgreSQL)]
     API -->|Queue Task| Redis[(Redis / Celery)]
     
-    Scheduler[Scheduler Service] -->|Cron check (Celery Beat)| Redis
+    Scheduler[Scheduler Service] -->|"Cron check (Celery Beat)"| Redis
     Scheduler -->|Read Schedule| DB
     
     Redis -->|fetching_queue| Headless[Headless Worker]
@@ -16,7 +16,9 @@ graph TD
     
     Headless -->|Fetch Page| Web[Target Website]
     Headless -->|Raw Content| DB
-    Headless -->|process_content -> ai_queue| Redis
+    
+    %% Fixed: Added quotes here too because '->' is a special syntax character
+    Headless -->|"process_content -> ai_queue"| Redis
     
     AI -->|Read Content & Cache| DB
     AI -->|Call LLM| LLM[LLM Provider]
