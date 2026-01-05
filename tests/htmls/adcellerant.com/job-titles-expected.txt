@@ -1,0 +1,1 @@
+class="elementor-heading-title\s*adch1[^"]*?"\s*>\s*([^<]+?)\s*</

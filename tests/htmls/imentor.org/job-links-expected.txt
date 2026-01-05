@@ -1,0 +1,1 @@
+class="lever-job-title"\s+href="([^"]+)"
