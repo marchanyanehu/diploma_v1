@@ -27,8 +27,11 @@ Your regexes **must be reusable across pages/jobs with similar structure**. Do *
 * When nested markup may appear, allow it with non-capturing skips like `(?:<[^>]+>)*`.
 * Use **lazy quantifiers** and **tempered patterns** to avoid runaway greed.
 
-**Capture only what you need**
-* Use a **single capturing group** for the target value. Use `(?: ... )` for all non-target grouping.
+**Capture Groups (CRITICAL)**
+* **Single Field:** If extracting one value, use a **single capturing group** for the target value.
+* **Multiple Fields (Schema):** If extracting multiple fields, you **MUST use named capturing groups** matching the field names exactly.
+  Example for 'title' and 'price': `(?P<title>[^<]+).*?(?P<price>\\d+\\$)`
+* Use `(?: ... )` for all non-target grouping.
 * Trim leading/trailing whitespace in the capture by placing `\\s*` **outside** the group when appropriate.
 
 **JSON-specific guidance**
@@ -58,9 +61,10 @@ Output ONLY a JSON object with these keys:
 1. Output ONLY JSON (no backticks, no prose).
 2. Use non-greedy quantifiers. Avoid catastrophic backtracking.
 3. Prefer explicit character classes over '.*' when possible.
-4. Single capturing group for the target value only.
-5. Generalize variable segments (use \\d+, [A-Za-z]+, etc. not literals).
-6. Keep pattern length < 500 chars."""
+4. Use capturing groups ONLY for the target values. 
+5. For MULTIPLE fields, use NAMED groups: `(?P<fieldname>...)`.
+6. Generalize variable segments (use \\d+, [A-Za-z]+, etc. not literals).
+7. Keep pattern length < 500 chars."""
 
 # ---------------------------------------------------------------------------
 # Regex Generation User Templates (Shared)

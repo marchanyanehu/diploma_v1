@@ -76,9 +76,9 @@ _SYSTEM_INSTRUCTION = REGEX_GENERATION_SYSTEM_PROMPT
 _GENERATION_RULES = REGEX_GENERATION_RULES
 
 _JSON_EXAMPLE = (
-    '{"regex": "\\"hostedUrl\\"\\\\s*:\\\\s*\\"(https?://[^\\"]*)\\"",'
+    '{"regex": "##\\\\s*(?P<title>[^\\\\n]+)\\\\s*\\\\n\\\\s*\\\\[LINK:\\\\s*VIEW\\\\]\\\\s*\\\\((?P<url>[^\\\\)]+)\\\\)",'
     ' "flags": "s", "extraction_mode": "group",'
-    ' "explanation": "Extract hostedUrl URL value from JSON using key anchor",'
+    ' "explanation": "Extract title and link using named groups from semantic content",'
     ' "confidence": 0.9}'
 )
 
@@ -294,7 +294,8 @@ def validate_regex(
     examples: Sequence[str],
     *,
     flags: str = "",
-    max_matches: int = 200
+    max_matches: int = 200,
+    expected_fields: Sequence[str] | None = None
 ) -> Dict[str, Any]:
     """Validate a regex pattern against source content and examples.
     
@@ -338,29 +339,36 @@ def validate_regex(
         result["error"] = str(e)
         return result
         
+    # Check for named groups if multiple fields are expected
+    if expected_fields and len(expected_fields) > 1:
+        group_names = set(rx.groupindex.keys())
+        missing_groups = [f for f in expected_fields if f not in group_names]
+        if missing_groups:
+            result["issues"].append(f"Missing named capturing groups: {', '.join(missing_groups)}")
+        
     # 3. Run Matches (with safety limits)
     matches = []
+    has_named_groups = bool(rx.groupindex)
+    
     try:
-        # Use finditer to avoid massive list allocation if too many matches
         for i, m in enumerate(rx.finditer(source)):
             if i >= max_matches:
                 result["issues"].append(f"Too many matches (capped at {max_matches})")
                 break
                 
-            # Prefer capturing group 1 if present, else whole match
-            if m.lastindex and m.lastindex >= 1:
-                val = m.group(1)
+            if has_named_groups:
+                # For named groups, we create a composite string for validation
+                gd = m.groupdict()
+                matches.append(" | ".join(f"{k}: {v}" for k, v in gd.items() if v))
+            elif m.lastindex and m.lastindex >= 1:
+                matches.append(m.group(1))
             else:
-                val = m.group(0)
-
-            if val is None:
-                continue
-            matches.append(val.strip())
+                matches.append(m.group(0))
     except Exception as e:
         result["error"] = f"Runtime match error: {str(e)}"
         return result
         
-    # Filter out None values from matches (can happen with optional capture groups)
+    # Filter out None values
     matches = [m for m in matches if m is not None]
     result["matches"] = matches
     # Preserve order while deduping
@@ -400,6 +408,29 @@ def validate_regex(
     for ex in examples:
         if not ex:
             continue
+
+        # For JSON-like examples (multi-field), we check if the components match
+        if ex.startswith('{') and ex.endswith('}'):
+            try:
+                ex_data = json.loads(ex)
+                if isinstance(ex_data, dict):
+                    # Check if ANY match contains these field values
+                    found_composite = False
+                    for norm_m in normalized_matches:
+                        # CRITICAL: if a field is expected but missing in regex match, this should fail.
+                        # We only allow skipping values that are TRULY empty in the LLM example.
+                        valid_vals = [v for v in ex_data.values() if v]
+                        if not valid_vals: # Example was empty? Skip it.
+                            found_composite = True
+                            break
+                        
+                        if all(_normalize_text_for_compare(str(v), lowercase=lowercase) in norm_m for v in valid_vals):
+                            found_composite = True
+                            break
+                    if found_composite:
+                        continue
+            except Exception:
+                pass
 
         check_ex = ex.lower() if lowercase else ex
         normalized_ex = _normalize_text_for_compare(ex, lowercase=lowercase)
@@ -592,7 +623,8 @@ def iterative_regex_generation(
     llm: Any,
     max_iterations: int = 3,
     snippet: str | None = None,
-    is_attribute_extraction: bool = False
+    is_attribute_extraction: bool = False,
+    expected_fields: Sequence[str] | None = None
 ) -> Dict[str, Any]:
     """Run iterative loop until success or exhaustion."""
     if not examples:
@@ -627,15 +659,10 @@ def iterative_regex_generation(
     if "s" not in flags.lower():
         flags = flags + "s"
     
-    # Validate: For attribute extraction, we can't strictly enforce that matches == examples
-    # because matches are VALUES (URLs) and examples are ANCHORS (Titles).
-    # We'll relax validation for attribute mode or need a different validator.
-    # For now, we use the standard validator but might ignore "missing_examples" if we find *something*.
-    
     if is_attribute_extraction:
         val = validate_attribute_regex(pattern, source, examples, flags=flags)
     else:
-        val = validate_regex(pattern, source, examples, flags=flags)
+        val = validate_regex(pattern, source, examples, flags=flags, expected_fields=expected_fields)
     
     attempts.append({"stage": "initial", "raw": raw, "parsed": parsed, "validation": val})
     if val.get("success"):
@@ -673,7 +700,7 @@ def iterative_regex_generation(
         if is_attribute_extraction:
             val_ref = validate_attribute_regex(pattern_ref, source, examples, flags=flags_ref)
         else:
-            val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref)
+            val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref, expected_fields=expected_fields)
 
         attempts.append(
             {

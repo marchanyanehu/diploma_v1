@@ -216,14 +216,20 @@ def _cache_regex_from_extraction(
     snippet = semantic_content[snippet_start:snippet_start + 5000]
     
     try:
+        # For multiple fields, explicitly instruct to use named capturing groups
+        target_desc = f"Extract items with fields: {', '.join(fields)}"
+        if len(fields) > 1:
+            target_desc += ". IMPORTANT: Use NAMED capturing groups for each field (e.g. (?P<field_name>...))"
+
         # Use existing regex generation with semantic content
         result = regex_generation.iterative_regex_generation(
             source=semantic_content,
             examples=examples,
-            target_desc=f"Extract items with fields: {', '.join(fields)}",
+            target_desc=target_desc,
             llm=llm,
             snippet=snippet,
-            max_iterations=2
+            max_iterations=2,
+            expected_fields=fields
         )
         
         if result.get("success") and result.get("final_pattern"):
@@ -324,7 +330,8 @@ CONTENT:
             target_desc=field,
             llm=llm,
             snippet=snippet,
-            max_iterations=2
+            max_iterations=2,
+            expected_fields=[field]
         )
         
         if result.get("success"):
