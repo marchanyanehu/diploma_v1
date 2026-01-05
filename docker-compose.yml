@@ -130,6 +130,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       BASETEN_API_KEY: ${BASETEN_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - ./services/ai_worker:/app/services/ai_worker:ro
+      - ./shared:/app/shared:ro
     depends_on:
       postgres:
         condition: service_healthy

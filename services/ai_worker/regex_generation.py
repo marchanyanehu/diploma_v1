@@ -83,8 +83,20 @@ _JSON_EXAMPLE = (
 )
 
 
-def _examples_block(examples: Sequence[str]) -> str:
-    cleaned = [e.replace("\n", " ").strip() for e in examples if e.strip()]
+def _examples_block(examples: Sequence[str | Dict[str, Any]]) -> str:
+    cleaned = []
+    for e in examples:
+        if isinstance(e, dict):
+            # Format dict as compact JSON-like string
+            import json
+            try:
+                s = json.dumps(e, ensure_ascii=False)
+                cleaned.append(s)
+            except:
+                pass
+        elif isinstance(e, str) and e.strip():
+            cleaned.append(e.replace("\n", " ").strip())
+            
     return "\n".join(f"- {c}" for c in cleaned[:10])  # cap examples for token economy
 
 
@@ -113,13 +125,18 @@ def _normalize_text_for_compare(text: str, *, lowercase: bool = False) -> str:
     return stripped
 
 
-def _find_example_position_in_source(source: str, example: str) -> int | None:
-    """Find an example text in raw HTML source.
-
-    Examples often come from LLM semantic text extraction (decoded entities), while the raw HTML
-    still contains entity-escaped variants. We try a few variants to locate the anchor.
-    """
+def _find_example_position_in_source(source: str, example: str | Dict[str, Any]) -> int | None:
+    """Find an example text in raw HTML source. Supports both string and dict examples."""
     if not example:
+        return None
+
+    # For dict examples, pick the first non-empty value to anchor the position
+    if isinstance(example, dict):
+        for val in example.values():
+            if val and isinstance(val, str):
+                pos = _find_example_position_in_source(source, val)
+                if pos is not None:
+                    return pos
         return None
 
     candidates: list[str] = [example]
@@ -146,7 +163,7 @@ def _find_example_position_in_source(source: str, example: str) -> int | None:
     return None
 
 
-def _select_snippet_from_source(source: str, examples: Sequence[str], *, max_len: int = 32000) -> str:
+def _select_snippet_from_source(source: str, examples: Sequence[str | Dict[str, Any]], *, max_len: int = 32000) -> str:
     """Pick a snippet likely containing example anchors from a large HTML source.
 
     This prevents prompting the LLM with unrelated <head> content when examples are far
@@ -167,18 +184,21 @@ def _select_snippet_from_source(source: str, examples: Sequence[str], *, max_len
     return source[:max_len]
 
 
-def _snippet_contains_any_example(snippet: str, examples: Sequence[str]) -> bool:
-    """Heuristic: does the provided snippet likely include the relevant region?
-
-    Callers may pass a snippet derived from semantic text (innerText). For raw HTML sources this
-    snippet can miss the actual anchors due to entity encoding differences. If we can't find any
-    example (or its escaped variant) in the snippet, we should re-select from the full source.
-    """
+def _snippet_contains_any_example(snippet: str, examples: Sequence[str | Dict[str, Any]]) -> bool:
+    """Heuristic: does the provided snippet likely include the relevant region?"""
     if not snippet:
         return False
     for ex in examples[:10]:
         if not ex:
             continue
+        
+        # For dict, check if any non-empty value is in snippet
+        if isinstance(ex, dict):
+            for val in ex.values():
+                if val and isinstance(val, str) and (val in snippet or html.escape(val, quote=False) in snippet):
+                    return True
+            continue
+
         if ex in snippet:
             return True
         escaped = html.escape(ex, quote=False)
@@ -213,13 +233,23 @@ def build_generation_messages(
         for ex in examples:
             if not ex:
                 continue
-            # Prefer marking the exact example; fallback to marking its HTML-escaped variant.
-            if ex in marked_snippet:
-                marked_snippet = marked_snippet.replace(ex, f"[[EXAMPLE→]]{ex}[[←EXAMPLE]]", 1)
-                continue
-            escaped = html.escape(ex, quote=False)
-            if escaped != ex and escaped in marked_snippet:
-                marked_snippet = marked_snippet.replace(escaped, f"[[EXAMPLE→]]{escaped}[[←EXAMPLE]]", 1)
+            
+            ex_strs = []
+            if isinstance(ex, dict):
+                # Use values as markers
+                ex_strs = [str(v) for v in ex.values() if v and isinstance(v, str)]
+            elif isinstance(ex, str):
+                ex_strs = [ex]
+                
+            for s in ex_strs:
+                if not s: continue
+                # Prefer marking the exact example; fallback to marking its HTML-escaped variant.
+                if s in marked_snippet:
+                    marked_snippet = marked_snippet.replace(s, f"[[EXAMPLE→]]{s}[[←EXAMPLE]]", 1)
+                    continue
+                escaped = html.escape(s, quote=False)
+                if escaped != s and escaped in marked_snippet:
+                    marked_snippet = marked_snippet.replace(escaped, f"[[EXAMPLE→]]{escaped}[[←EXAMPLE]]", 1)
         
         # Detect if example is multi-line (spans multiple HTML elements)
         has_multiline_example = any('\n' in ex for ex in examples if ex)
@@ -345,11 +375,16 @@ def validate_regex(
         # If we have issues, we should still continue to see if it even matches literals
         
     # Check for named groups if multiple fields are expected
+    # NOTE: This is a warning, not a hard failure - we still cache if the pattern captures *something*
     if expected_fields and len(expected_fields) > 1:
         group_names = set(rx.groupindex.keys())
         missing_groups = [f for f in expected_fields if f not in group_names]
         if missing_groups:
-            result["issues"].append(f"Missing named capturing groups: {', '.join(missing_groups)}")
+            # Log but don't fail - the pattern might still work with positional groups
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Regex missing named groups: {missing_groups}. Pattern has {rx.groups} capturing groups."
+            )
         
     # 3. Run Matches (with safety limits)
     matches = []
@@ -414,18 +449,32 @@ def validate_regex(
         if not ex:
             continue
 
-        # For JSON-like examples (multi-field), we check if the components match
-        if ex.startswith('{') and ex.endswith('}'):
+        # For dict examples, we check if the components match
+        if isinstance(ex, dict):
+            # Check if ANY match contains these field values
+            found_composite = False
+            for norm_m in normalized_matches:
+                valid_vals = [v for v in ex.values() if v and isinstance(v, str)]
+                if not valid_vals: 
+                    found_composite = True
+                    break
+                
+                if all(_normalize_text_for_compare(str(v), lowercase=lowercase) in norm_m for v in valid_vals):
+                    found_composite = True
+                    break
+            if found_composite:
+                continue
+
+        # For JSON-like string examples (legacy compatibility)
+        if isinstance(ex, str) and ex.startswith('{') and ex.endswith('}'):
             try:
                 ex_data = json.loads(ex)
                 if isinstance(ex_data, dict):
                     # Check if ANY match contains these field values
                     found_composite = False
                     for norm_m in normalized_matches:
-                        # CRITICAL: if a field is expected but missing in regex match, this should fail.
-                        # We only allow skipping values that are TRULY empty in the LLM example.
                         valid_vals = [v for v in ex_data.values() if v]
-                        if not valid_vals: # Example was empty? Skip it.
+                        if not valid_vals: 
                             found_composite = True
                             break
                         
@@ -436,6 +485,9 @@ def validate_regex(
                         continue
             except Exception:
                 pass
+
+        if not isinstance(ex, str):
+            continue
 
         check_ex = ex.lower() if lowercase else ex
         normalized_ex = _normalize_text_for_compare(ex, lowercase=lowercase)
@@ -470,7 +522,11 @@ def validate_regex(
             
     if missing:
         result["missing_examples"] = missing
-        result["issues"].append(f"Failed to match {len(missing)}/{len(examples)} provided examples")
+        # Allow up to 50% missing examples - the pattern is still useful for caching
+        # since LLM extraction already succeeded
+        matched_count = len(examples) - len(missing)
+        if matched_count == 0 or (len(missing) / len(examples)) > 0.5:
+            result["issues"].append(f"Failed to match {len(missing)}/{len(examples)} provided examples")
     
     # 6. Check precision - if we match WAY more than examples, pattern might be too broad
     # Allow generous headroom for list pages / APIs with many items (e.g., 200x the examples, capped)

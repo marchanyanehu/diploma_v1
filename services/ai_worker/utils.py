@@ -104,7 +104,16 @@ def log_event(task_id: str, event: str, **fields) -> None:
         logger.info("%s %s", event, fields)
 
 def convert_html_to_markdown_like(html: str) -> str:
-    """Convert HTML to text but preserve links and images in Markdown format."""
+    """Convert HTML to text but preserve links and images in Markdown format. 
+    Strips scripts and styles first to reduce noise.
+    """
+    if not html:
+        return ""
+        
+    # Strip script and style tags
+    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.IGNORECASE | re.DOTALL)
+
     def replace_link(match):
         attrs = match.group(1)
         text = match.group(2)
@@ -128,12 +137,17 @@ def convert_html_to_markdown_like(html: str) -> str:
             if srcset_match:
                 # srcset format: "url1 1x, url2 2x" -> take first URL token
                 first_src = srcset_match.group(1).split(",")[0].strip().split(" ")[0]
-                src_match = re.match(r".*", first_src)
-        if not src_match:
+                # Store the URL directly, we'll handle it below
+                src_direct = first_src
+            else:
+                src_direct = None
+        else:
+            src_direct = None
+        if not src_match and not src_direct:
             src_match = re.search(r'src=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
 
         alt_match = re.search(r'alt=["\']([^"\']*)["\']', attrs, re.IGNORECASE)
-        src = src_match.group(1) if src_match else ""
+        src = src_direct if src_direct else (src_match.group(1) if src_match else "")
         alt = alt_match.group(1) if alt_match else "image"
         if not src:
             return ""

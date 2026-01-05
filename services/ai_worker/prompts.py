@@ -122,30 +122,26 @@ Create a regex to capture content matching the expected text from visible HTML e
 
 SCHEMA_EXTRACTION_SYSTEM_PROMPT = """You are a precise data extraction assistant. Your task is to find and extract ALL matching records from web content. Output ONLY valid JSON."""
 
-SCHEMA_EXTRACTION_USER_TEMPLATE = """Extract records with these fields: {fields_list}
+SCHEMA_EXTRACTION_USER_TEMPLATE = """Extract all records from this listing page with these fields: {fields_list}
 
 PAGE CONTENT:
 {content_snippet}
 
 CRITICAL INSTRUCTIONS:
-1. Find ALL records/items that contain the requested fields - THIS IS A PRODUCT LISTING PAGE
-2. Look for REPEATING structures (product cards, list items, article tags, divs with product data)
-3. Extract EVERY SINGLE product you can find - aim for 20-30+ items if they exist
-4. Do NOT stop after finding just a few items - scroll through all the content
-5. Extract EXACT text values as they appear (titles, prices, etc.)
-6. Field names must match EXACTLY: {fields_list}. Do not invent new names.
-7. For image_url: use the URL from <img> src/srcset/data-src/data-original OR markdown tokens like [IMAGE: ...](URL); keep full absolute URL (no truncation). NEVER use product detail page links as image_url.
-8. If a field is empty/missing for an item, use ""
-9. Skip navigation menus, headers, footers, sidebars - focus ONLY on product listings
+1. This is a LISTING PAGE. Find EVERY SINGLE item that contain the requested fields.
+2. Look for repeating structures (cards, list items, table rows).
+3. Aim to extract ALL items you can find (there are usually multiple).
+4. Extract exact text values as they appear in the content.
+5. Field names must match EXACTLY: {fields_list}.
+6. For URLs: Capture the full absolute URL.
+7. Focus on the primary data listing in the center of the page.
 
-Output format - JSON with "items" array containing ALL products:
+Output format - JSON with "items" array:
 {{"items": [
-  {{"title": "Product 1", "price": "10€"}},
-  {{"title": "Product 2", "price": "20€"}},
-  ... (continue with ALL remaining products)
+  {{"field1": "Value 1", "field2": "Value 2"}},
+  ...
 ]}}
 
-REMINDER: Extract ALL products, not just 5-10. If you see 25 products, return all 25.
 Return ONLY valid JSON."""
 
 # ---------------------------------------------------------------------------
