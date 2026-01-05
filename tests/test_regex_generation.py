@@ -52,11 +52,43 @@ def test_validate_regex_basic_success():
 
 def test_validate_regex_missing_example():
     source = "Job Title: Senior Engineer\nOther\nJob Title: Data Scientist\n"
-    examples = ["Senior Engineer", "Data Scientist", "Product Manager"]
+    # Need >50% missing to trigger failure
+    examples = ["Senior Engineer", "Data Scientist", "Missing1", "Missing2", "Missing3"]
     pattern = r"Job Title: ([A-Za-z ]+)"
     result = rg.validate_regex(pattern, source, examples, flags="")
     assert not result["success"]
-    assert "Product Manager" in result["missing_examples"]
+    assert "Missing1" in result["missing_examples"]
+
+
+def test_generate_composite_regex_fallback_order_whitespace_mismatch():
+    """Test that composite generation proceeds even if examples are not strictly locatable in source (e.g. whitespace diff)."""
+    source = "Title:    Manager"
+    examples = [{"job_title": "Title: Manager"}] # Exact string mismatch due to spaces
+    
+    class CompositeLLM:
+        def chat(self, messages, temperature=0.0, **kwargs):
+            # Return a regex that handles the extra spaces
+            return json.dumps({
+                "regex": r"(Title:\s+Manager)", 
+                "flags": "",
+                "confidence": 1.0
+            })
+            
+    llm = CompositeLLM()
+    # This calls generate_composite_regex which uses _find_example_position_in_source.
+    # _find... will fail to find "Title: Manager" in "Title:    Manager".
+    # Before the fix, this would return error "Could not locate...".
+    # After the fix, it should log warning and proceed to use arbitrary order.
+    result = rg.generate_composite_regex(
+        source=source,
+        examples=examples,
+        target_desc="test",
+        llm=llm
+    )
+    
+    assert result["success"], f"Failed: {result.get('error')}"
+    assert "job_title" in result["components"]
+
 
 
 def test_iterative_generation_refinement_flow():

@@ -827,12 +827,13 @@ def generate_composite_regex(
     field_positions = []
     
     # We do a simple find for the values of the first example to guess order
-    search_window = source[:50000] # Cap search window
+    # We do a simple find for the values of the first example to guess order
+    # Use full source to ensure we find examples even if they are deep in the content
     for key, val in first_ex.items():
         if not val or not isinstance(val, str):
             continue
         # Use existing helper to find position (handles encoding)
-        pos = _find_example_position_in_source(search_window, val)
+        pos = _find_example_position_in_source(source, val)
         if pos is not None:
             field_positions.append((pos, key))
             
@@ -841,7 +842,8 @@ def generate_composite_regex(
     ordered_keys = [k for _, k in field_positions]
     
     if not ordered_keys:
-        return {"success": False, "error": "Could not locate example fields to determine order"}
+        logger.warning("Composite Regex: Could not locate example fields to determine order, falling back to arbitrary key order.")
+        ordered_keys = list(first_ex.keys())
     
     logger.info(f"Composite Regex: Determined field order: {ordered_keys}")
     
@@ -871,9 +873,10 @@ def generate_composite_regex(
             # If one field fails, we can either fail whole or return partial.
             # Plan says "Generated selector must return n elements... on fail do not add cache".
             # So strict failure.
+            fail_reason = result.get('error') or result.get('attempts', [])[-1].get('validation', {}).get('issues')
             return {
                 "success": False, 
-                "error": f"Failed to generate valid parser for field '{key}' matching {expected_count} items."
+                "error": f"Failed to generate valid parser for field '{key}': {fail_reason}"
             }
             
     # Success

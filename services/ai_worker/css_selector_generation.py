@@ -184,11 +184,24 @@ def _validate_selector(
         return {"success": False, "issue": str(e)}
 
 def _get_snippet(html: str, examples: List[str]) -> str:
-    # return window around first example
+    # return window around first found example
     if not examples:
         return html[:5000]
     
-    idx = html.find(examples[0])
+    import html as html_lib
+    idx = -1
+    for ex in examples:
+        # Try exact match
+        idx = html.find(ex)
+        if idx != -1:
+            break
+        # Try escaped match (e.g. & -> &amp;)
+        escaped = html_lib.escape(ex)
+        if escaped != ex:
+             idx = html.find(escaped)
+             if idx != -1:
+                 break
+                 
     if idx == -1:
         return html[:5000]
         

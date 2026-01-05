@@ -1,1 +1,4 @@
+regex:
 class="elementor-heading-title\s*adch1[^"]*?"\s*>\s*([^<]+?)\s*</
+css:
+h1.elementor-heading-title.adch1-heading

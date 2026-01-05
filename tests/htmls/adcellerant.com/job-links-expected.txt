@@ -1,1 +1,4 @@
+regex:
 href="([^"]+)"\s+class="elementor-button-link\s*elementor-button[^"]*?"
+css:
+a.elementor-button-link.elementor-size-xs[href]
