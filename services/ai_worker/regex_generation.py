@@ -75,12 +75,7 @@ from .prompts import (
 _SYSTEM_INSTRUCTION = REGEX_GENERATION_SYSTEM_PROMPT
 _GENERATION_RULES = REGEX_GENERATION_RULES
 
-_JSON_EXAMPLE = (
-    '{"regex": "##\\\\s*(?P<title>[^\\\\n]+)\\\\s*\\\\n\\\\s*\\\\[LINK:\\\\s*VIEW\\\\]\\\\s*\\\\((?P<url>[^\\\\)]+)\\\\)",'
-    ' "flags": "s", "extraction_mode": "group",'
-    ' "explanation": "Extract title and link using named groups from semantic content",'
-    ' "confidence": 0.9}'
-)
+
 
 
 def _examples_block(examples: Sequence[str | Dict[str, Any]]) -> str:

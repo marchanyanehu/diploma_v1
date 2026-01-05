@@ -354,6 +354,3 @@ CONTENT:
     
     return []
 
-def _get_matches_with_positions(pattern: str, flags: str, content: str) -> List[tuple]:
-    # Legacy helper, kept if needed, but likely unused now
-    return []
