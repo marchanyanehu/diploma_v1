@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from urllib.parse import urlparse
@@ -15,6 +16,7 @@ from shared.logging_utils import configure_logging
 from .input_sanitization import sanitize_user_input, InputSanitizationError
 from .intent_extraction import extract_intent
 from .llm_client import LLMClient
+from .prompts import FIELD_NORMALIZATION_SYSTEM_PROMPT, FIELD_NORMALIZATION_USER_TEMPLATE
 from . import workflows
 from . import utils
 
@@ -87,25 +89,37 @@ def process_request_full(task_id: str, url: str, prompt: str) -> Dict[str, Any]:
     finally:
         db.close()
 
-# TODO: add a unifier call to llm to prevent any hardcoded logic
-def _normalize_fields(fields: List[str]) -> List[str]:
-    """Normalize field names to improve LLM consistency (e.g., image_url)."""
-    normalized = []
+def _normalize_fields(fields: List[str], llm: Optional[LLMClient] = None) -> List[str]:
+    """Normalize field names to improve LLM consistency using AI when available.
+    
+    Avoids hardcoding field-specific heuristics (like 'price' or 'image').
+    """
+    if not fields:
+        return []
+        
+    # Basic string cleaning (always safe and non-heuristic)
+    cleaned = []
     for f in fields:
-        if not f:
-            continue
+        if not f: continue
         low = f.strip().lower().replace("-", " ").replace(".", " ")
-        low = "_".join(low.split())
-        if "image" in low and "url" in low:
-            low = "image_url"
-        elif "image" in low:
-            low = "image"
-        elif "price" in low:
-            low = "price"
-        elif "item" in low or "product" in low:
-            low = "item"
-        normalized.append(low)
-    return list(dict.fromkeys(normalized))  # keep order, dedupe
+        cleaned.append("_".join(low.split()))
+    
+    # If llm is provided, use it for intelligent normalization (avoiding hardcoding)
+    if llm:
+        try:
+            messages = [
+                {"role": "system", "content": FIELD_NORMALIZATION_SYSTEM_PROMPT},
+                {"role": "user", "content": FIELD_NORMALIZATION_USER_TEMPLATE.format(fields=", ".join(cleaned))}
+            ]
+            raw = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
+            data = json.loads(raw)
+            norm = data.get("normalized_fields", [])
+            if isinstance(norm, list) and norm:
+                return list(dict.fromkeys(str(n) for n in norm if n))
+        except Exception as e:
+            logger.warning(f"AI field normalization failed: {e}")
+            
+    return list(dict.fromkeys(cleaned))  # fallback to basic cleaned list
 
 
 @celery_app.task(name="scrape.process_content")
@@ -133,8 +147,8 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         url_pattern = url
         
         # Determine extraction mode
-        keywords = _normalize_fields(intent.get("keywords", []))
-        schema_fields = _normalize_fields(intent.get("schema_fields", []))
+        keywords = _normalize_fields(intent.get("keywords", []), llm=llm)
+        schema_fields = _normalize_fields(intent.get("schema_fields", []), llm=llm)
         
         extracted_data = []
         used_parser = None

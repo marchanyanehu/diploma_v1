@@ -339,6 +339,11 @@ def validate_regex(
         result["error"] = str(e)
         return result
         
+    # Check for capturing groups (CRITICAL)
+    if rx.groups == 0:
+        result["issues"].append("Regex must contain at least one capturing group to extract data")
+        # If we have issues, we should still continue to see if it even matches literals
+        
     # Check for named groups if multiple fields are expected
     if expected_fields and len(expected_fields) > 1:
         group_names = set(rx.groupindex.keys())

@@ -34,7 +34,12 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .llm_client import LLMClient
-from .prompts import INTENT_EXTRACTION_SYSTEM_PROMPT, INTENT_EXTRACTION_USER_TEMPLATE
+from .prompts import (
+    INTENT_EXTRACTION_SYSTEM_PROMPT, 
+    INTENT_EXTRACTION_USER_TEMPLATE,
+    INTENT_REFINEMENT_SYSTEM_PROMPT,
+    INTENT_REFINEMENT_USER_TEMPLATE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +118,11 @@ def _coerce_schema(data: Dict[str, Any], original: str) -> Dict[str, Any]:
     # Extract schema_fields - these are the exact field names for output
     schema_fields = [str(x).strip() for x in data.get("schema_fields", []) if x][:20]
     
-    # If no schema_fields but keywords look like field names (snake_case or single words), use them
+    # If no schema_fields but keywords look like field names (snake_case), use them
     keywords = _dedupe_lower([str(x) for x in data.get("keywords", [])][:30])
     if not schema_fields and keywords:
-        # Check if keywords look like field names (contain _ or are single technical words)
-        potential_fields = [k for k in keywords if '_' in k or k in ['country', 'city', 'state', 'title', 'url', 'name', 'price', 'description']]
+        # Check if keywords look like classic field names (contain _)
+        potential_fields = [k for k in keywords if '_' in k]
         if len(potential_fields) >= 2:
             schema_fields = potential_fields
     
@@ -146,6 +151,32 @@ def _safe_confidence(val: Any) -> float:
         return 0.5
 
 
+def _refine_intent_schema(keywords: List[str], original_input: str, llm: Any) -> List[str]:
+    """Use AI to decide if keywords should be promoted to schema_fields.
+    
+    Avoids hardcoding heuristics by delegating the decision to the LLM.
+    """
+    if not keywords or len(keywords) < 2:
+        return []
+        
+    try:
+        messages = [
+            {"role": "system", "content": INTENT_REFINEMENT_SYSTEM_PROMPT},
+            {"role": "user", "content": INTENT_REFINEMENT_USER_TEMPLATE.format(
+                original_input=original_input, 
+                keywords=", ".join(keywords)
+            )}
+        ]
+        raw = llm.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
+        data = json.loads(raw)
+        fields = data.get("schema_fields", [])
+        if isinstance(fields, list):
+            return [str(f).strip() for f in fields if f][:20]
+    except Exception as exc:
+        logger.warning("Intent refinement failed: %s", exc)
+    return []
+
+
 def extract_intent(user_input: str, *, llm: Optional[Any] = None) -> Dict[str, Any]:
     """Extract structured intent from user_input using the LLM.
 
@@ -160,6 +191,14 @@ def extract_intent(user_input: str, *, llm: Optional[Any] = None) -> Dict[str, A
     try:
         raw = client.chat(messages, temperature=0.1, extra_params={"response_format": {"type": "json_object"}})
         parsed = _safe_parse_json(raw, user_input)
+        
+        # If schema_fields is empty but keywords have multiple items, try refining with AI
+        if not parsed.get("schema_fields") and len(parsed.get("keywords", [])) >= 2:
+            refined_fields = _refine_intent_schema(parsed["keywords"], user_input, client)
+            if refined_fields:
+                parsed["schema_fields"] = refined_fields
+                logger.info("Intent schema refined with AI: %s", refined_fields)
+                
         return parsed
     except Exception as exc:  # noqa: BLE001
         logger.warning("Intent extraction failed: %s", exc)

@@ -166,3 +166,36 @@ INTENT_EXTRACTION_USER_TEMPLATE = """USER_REQUEST:
 {user_input}
 
 Return JSON with keys: target, original_input, keywords, constraints, output_shape, confidence, source_type, target_attribute, schema_fields"""
+
+# ---------------------------------------------------------------------------
+# Intent Refinement (Specific to shared/intent_extraction.py)
+# ---------------------------------------------------------------------------
+
+INTENT_REFINEMENT_SYSTEM_PROMPT = """You are a schema refinement assistant. Your task is to decide if a set of keywords from a web scraping request should be treated as individual structured fields (a schema) or a single search target.
+
+If they are individual fields (e.g., "title", "price", "link"), return a JSON list of those fields.
+If they represent a single entity or search query, return an empty list [].
+
+Output ONLY a JSON object with the key "schema_fields"."""
+
+INTENT_REFINEMENT_USER_TEMPLATE = """USER_REQUEST: {original_input}
+KEYWORDS: {keywords}
+
+Should these keywords be extracted as separate fields? If yes, provide them as a JSON list.
+Example: For "job titles and links", return {{"schema_fields": ["job_title", "job_link"]}}"""
+
+# ---------------------------------------------------------------------------
+# Field Normalization (Specific to tasks.py)
+# ---------------------------------------------------------------------------
+
+FIELD_NORMALIZATION_SYSTEM_PROMPT = """You are a technical field name normalizer. Convert a list of messy field names into clean, consistent, snake_case identifiers.
+
+Rules:
+1. Use snake_case only.
+2. Be descriptive but concise.
+3. Group similar concepts (e.g., "cost", "amt", "price" -> "price").
+4. Return ONLY a JSON object with the key "normalized_fields"."""
+
+FIELD_NORMALIZATION_USER_TEMPLATE = """FIELDS: {fields}
+
+Normalize these into a JSON list of clean snake_case identifiers."""
