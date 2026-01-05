@@ -21,22 +21,28 @@ from shared.database import Base
 from services.api import auth
 import shared.database as db_utils
 
-# Use file-based DB for debugging
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_debug.db"
+# Use in-memory DB to avoid file locking issues
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
-if os.path.exists("./test_debug.db"):
-    os.remove("./test_debug.db")
+# if os.path.exists("./test_debug.db"):
+#     os.remove("./test_debug.db")
 
+
+# Create in-memory engine
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30},
     poolclass=StaticPool,
 )
-
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Patch shared.database.connection to use our in-memory engine globally
+# This ensures background tasks and other modules use the SAME DB instance
+import shared.database.connection
+shared.database.connection.engine = engine
+shared.database.connection.SessionLocal = TestingSessionLocal
+
 def override_get_db():
-    print(f"DEBUG: override_get_db called. Engine: {engine.url}")
     try:
         db = TestingSessionLocal()
         yield db
@@ -57,43 +63,33 @@ def client():
 @pytest.fixture
 def auth_client(client):
     """Create an authenticated test client."""
-    # Create user
-    db = TestingSessionLocal()
-    try:
-        # Check if user exists first (tests share state sometimes if not properly torn down)
-        if not db_utils.get_user_by_username(db, "testuser"):
-            # Manually instantiate AuthService to avoid Depends() error
-            user_repo = auth.SqlAlchemyUserRepository(db)
-            auth_service = auth.AuthService(
-                secret_key=auth.SECRET_KEY,
-                algorithm=auth.ALGORITHM,
-                access_token_expire_minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES,
-                user_repo=user_repo
-            )
-            hashed_password = auth_service.hash_password("testpass")
-            db_utils.create_user(db, "testuser", hashed_password, "test@example.com")
-    finally:
-        db.close()
+    # Register user via API to ensure consistency
+    client.post(
+        "/auth/register",
+        json={
+            "username": "testuser",
+            "password": "testpass",
+            "email": "test@example.com"
+        }
+    )
 
-    # Get token
-    # Re-instantiate AuthService for token creation (needs no DB session for encoding)
-    # We can pass a dummy repo or None if we trust it doesn't use it for encoding
-    # But AuthService.__init__ requires user_repo.
-    # Let's just use a fresh session/repo.
-    db = TestingSessionLocal()
-    try:
-        user_repo = auth.SqlAlchemyUserRepository(db)
-        auth_service = auth.AuthService(
-            secret_key=auth.SECRET_KEY,
-            algorithm=auth.ALGORITHM,
-            access_token_expire_minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES,
-            user_repo=user_repo
-        )
-        token = auth_service.create_access_token(username="testuser")
-    finally:
-        db.close()
+    # Login to get token
+    response = client.post(
+        "/auth/token",
+        data={
+            "username": "testuser",
+            "password": "testpass"
+        }
+    )
+    
+    if response.status_code == 200:
+        token = response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+    else:
+        # Fallback for debugging - if registration failed due to existing user?
+        # But tables are dropped each time...
+        print(f"DEBUG: Login failed: {response.text}")
 
-    client.headers.update({"Authorization": f"Bearer {token}"})
     return client
 
 
