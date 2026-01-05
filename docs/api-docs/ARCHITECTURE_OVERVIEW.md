@@ -219,7 +219,7 @@ The Intelligent Web Data Aggregator API is a microservices-based architecture th
 
 ```
 users
- ├── scraping_tasks (one-to-many
+ ├── scraping_tasks (one-to-many)
  ├── scheduled_jobs (one-to-many)
  │
 scraping_tasks
@@ -238,7 +238,7 @@ parsers_cache
 
 - **JWT Tokens**: Stateless authentication with configurable expiry
 - **Password Hashing**: bcrypt with salt and work factor
-- **Token Revocation**: Not implemented (t (stateless design)
+- **Token Revocation**: Not implemented (stateless design)
 - **User Roles**: Basic user model (future: admin roles)
 
 ### 2. Input Validation & Sanitization
