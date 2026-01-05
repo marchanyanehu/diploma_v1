@@ -26,7 +26,8 @@ def generate_parser(
     examples: List[Union[str, Dict]],
     target_desc: str,
     llm: Any,
-    source_type_hint: Optional[str] = None
+    source_type_hint: Optional[str] = None,
+    expected_count: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Generate the best parser for the given content and examples.
@@ -55,17 +56,27 @@ def generate_parser(
                 html_content=content,
                 examples=examples,
                 target_desc=target_desc,
-                llm=llm
+                llm=llm,
+                expected_count=expected_count
             )
             if result.get("success"):
-                return {
-                    "success": True,
-                    "pattern": result["selector"],
-                    "source_type": "CSS",
-                    "flags": result.get("attribute", ""), # Store attribute to extract (text, href, etc.)
-                    "metadata": result.get("metadata", {})
-                }
-            logger.warning("CSS Selector generation failed, falling back to Regex.")
+                if result.get("selectors"):
+                    # New map format
+                    return {
+                        "success": True,
+                        "parsers": result["selectors"], # {field: selector}
+                        "type": "map",
+                        "source_type": "CSS"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "pattern": result["selector"],
+                        "source_type": "CSS",
+                        "flags": result.get("attribute", ""), # Store attribute to extract (text, href, etc.)
+                        "metadata": result.get("metadata", {})
+                    }
+            logger.warning(f"CSS Selector generation failed: {result.get('error')}, falling back to Regex.")
         else:
             logger.warning("parsel not installed, skipping CSS generation.")
 
@@ -106,8 +117,17 @@ def generate_parser(
             source=content,
             examples=examples,
             target_desc=target_desc,
-            llm=llm
+            llm=llm,
+            expected_count=expected_count
         )
+        if result.get("success"):
+             return {
+                 "success": True,
+                 "parsers": result["components"], # {field: regex}
+                 "type": "map",
+                 "source_type": "REGEX",
+                 "flags": "s" 
+             }
     else:
         # Standard iterative generation
         result = regex_generation.iterative_regex_generation(
@@ -115,7 +135,8 @@ def generate_parser(
             examples=examples,
             target_desc=target_desc,
             llm=llm,
-            max_iterations=2
+            max_iterations=2,
+            expected_count=expected_count
         )
     
     if result.get("success"):

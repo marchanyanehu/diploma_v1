@@ -30,32 +30,71 @@ HTML SNIPPET:
 
 Generate a CSS selector to extract the target values."""
 
+
 def generate_css_selector(
     html_content: str,
     examples: List[Union[str, Dict]],
     target_desc: str,
     llm: Any,
-    max_retries: int = 2
+    max_retries: int = 2,
+    expected_count: Optional[int] = None
 ) -> Dict[str, Any]:
     
     if not Selector:
         return {"success": False, "error": "parsel not installed"}
 
-    # Prepare examples
-    # Flatten dicts to single values if possible, or handle multi-field (future)
-    # For now, assume we generate a selector for the PRIMARY field or the list item container
+    if not examples:
+        return {"success": False, "error": "No examples provided"}
+
+    # Detect multi-field mode
+    is_multi_field = isinstance(examples[0], dict) and len(examples[0]) > 1
     
-    # Simple case: List of strings (one field extraction)
+    if is_multi_field:
+        # Multi-field strategy: Generate selector for EACH field
+        first_ex = examples[0]
+        components = {}
+        
+        for key in first_ex.keys():
+            # Extract examples just for this field
+            field_examples = [ex.get(key) for ex in examples if ex.get(key)]
+            if not field_examples:
+                continue
+                
+            field_target = f"{target_desc} - {key}"
+            
+            # Recursive call for single field
+            result = generate_css_selector(
+                html_content, 
+                field_examples, 
+                field_target, 
+                llm, 
+                max_retries=max_retries, 
+                expected_count=expected_count
+            )
+            
+            if result.get("success"):
+                components[key] = result["selector"]
+            else:
+                return {"success": False, "error": f"Failed to generate CSS for field '{key}': {result.get('error')}"}
+        
+        return {
+            "success": True, 
+            "selectors": components, # {field: selector}
+            "type": "map"
+        }
+
+    # --- Single Field Strategy ---
+    
+    # Prepare flat examples
     flat_examples = []
     for ex in examples:
         if isinstance(ex, dict):
-            # Take the first value
-            flat_examples.extend([str(v) for v in ex.values() if v])
+             # Take the first available value
+             flat_examples.extend([str(v) for v in ex.values() if v])
         else:
-            flat_examples.append(str(ex))
+             flat_examples.append(str(ex))
             
     # Locate snippet
-    # Find where examples occur to give LLM context
     snippet = _get_snippet(html_content, flat_examples)
     
     prompt = CSS_USER_TEMPLATE.format(
@@ -77,10 +116,11 @@ def generate_css_selector(
             selector = parsed.get("selector")
             
             if not selector:
-                raise ValueError("No selector returned")
+                attempts.append({"error": "No selector in JSON"})
+                continue
                 
             # Validate
-            validation = _validate_selector(html_content, selector, flat_examples)
+            validation = _validate_selector(html_content, selector, flat_examples, expected_count=expected_count)
             attempts.append({"selector": selector, "validation": validation})
             
             if validation["success"]:
@@ -91,7 +131,7 @@ def generate_css_selector(
                     "metadata": {"attempts": attempts}
                 }
             
-            # If failed, Refine (simple retry with same prompt for now, or could add feedback)
+            # If failed, Refine
             prompt += f"\n\nPrevious attempt {selector} failed: {validation['issue']}. Try again."
             
         except Exception as e:
@@ -99,14 +139,29 @@ def generate_css_selector(
 
     return {"success": False, "error": "Max retries exceeded", "attempts": attempts}
 
-def _validate_selector(html: str, selector: str, examples: List[str]) -> Dict[str, Any]:
+def _validate_selector(
+    html: str, 
+    selector: str, 
+    examples: List[str],
+    expected_count: Optional[int] = None
+) -> Dict[str, Any]:
     try:
         sel = Selector(text=html)
         extracted = sel.css(selector).getall()
+        # Clean extracted
         extracted = [e.strip() for e in extracted if e and e.strip()]
         
         extracted_set = set(extracted)
-        # Check coverage
+        
+        # 1. Count Check (Strict)
+        if expected_count is not None:
+            if len(extracted) != expected_count:
+                return {
+                    "success": False, 
+                    "issue": f"Count mismatch: expected {expected_count} items, found {len(extracted)}"
+                }
+
+        # 2. Example Coverage Check
         found_count = 0
         for ex in examples:
             if ex in extracted_set:
@@ -120,6 +175,7 @@ def _validate_selector(html: str, selector: str, examples: List[str]) -> Dict[st
             return {"success": False, "issue": "No examples found"}
         
         if found_count / len(examples) < 0.5:
+            # If we don't have expected_count to enforce, we rely on coverage
             return {"success": False, "issue": f"Only found {found_count}/{len(examples)} examples"}
             
         return {"success": True, "count": len(extracted)}

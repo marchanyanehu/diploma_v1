@@ -25,9 +25,73 @@ def check_cached_parser(
     db, domain: str, fields: List[str], search_content: str, 
     source_type: str = "SEMANTIC", min_matches: int = 1, url_pattern: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Check for and apply cached parser based on domain + complete URL + fields."""
+    """Check for and apply cached parser. Supports multi-field merge strategy."""
     
-    # Generic lookup
+    # 1. Try to find individual parsers for EACH field
+    # We only assume success if we find a parser for ALL requested fields
+    # (Or at least the major ones? For now, Strict: All or Nothing for structure consistency)
+    
+    parsers_map = {} # field -> parser_obj
+    for field in fields:
+        found = db_utils.find_cached_parser_by_fields(db, domain, [field], source_type, url_pattern=url_pattern, limit=1)
+        if found:
+            parsers_map[field] = found[0]
+        else:
+            # If any field is missing a parser, we might fallback to LLM.
+            # OR we try to find a composite parser for the whole set (legacy support)
+            break
+            
+    # If we found parsers for ALL fields, we execute them and Merge
+    if len(parsers_map) == len(fields):
+        # Execute each
+        field_results = {} # field -> [val1, val2]
+        min_len = 999999
+        
+        for field, p in parsers_map.items():
+            pattern = p.generated_regex
+            p_type = p.source_type
+            flags = ""
+            
+            if p_type in ["REGEX", "HTML"] and "(?" in pattern:
+                 patt, flags = decompose_stored_regex(cast(str, pattern))
+                 matches = parser_factory.execute_parser("REGEX", patt, search_content, flags)
+            elif p_type in ["REGEX", "HTML"]:
+                 matches = parser_factory.execute_parser("REGEX", pattern, search_content)
+            else:
+                 matches = parser_factory.execute_parser(p_type, pattern, search_content)
+                 
+            # Extract basic values
+            vals = [m["text"] for m in matches]
+            field_results[field] = vals
+            min_len = min(min_len, len(vals))
+            
+            db_utils.update_parser_usage(db, p.id)
+
+        if min_len > 0 and min_len < 999999:
+            # Zip Merge
+            merged = []
+            for i in range(min_len):
+                item = {}
+                for field in fields:
+                    item[field] = field_results[field][i]
+                
+                # Text repr
+                text_repr = " | ".join(f"{k}: {v}" for k,v in item.items())
+                merged.append({
+                    "text": text_repr,
+                    "fields": item,
+                    "source": "composite_cache",
+                    "confidence": 0.9
+                })
+            
+            logger.info(f"Composite Cache Hit: merged {min_len} items from {len(fields)} fields")
+            return {
+                "used_parser": None, # It's a composite, no single parser object to return
+                "matches": merged,
+                "used_cached": True
+            }
+
+    # 2. Legacy Fallback: Look for a single parser covering ALL fields
     parsers = db_utils.find_cached_parser_by_fields(db, domain, fields, source_type, url_pattern=url_pattern)
 
     for p in parsers:
@@ -216,34 +280,67 @@ def _cache_parser_from_extraction(
         )
         
         if result.get("success"):
-            pattern = result["pattern"]
-            source_type = result["source_type"] # CSS, JSONPATH, REGEX
-            flags = result.get("flags", "")
             
-            # Store regex flags inline for DB compatibility
-            if source_type == "REGEX":
-                stored_regex = f"(?{flags}){pattern}" if flags else pattern
+            # Handle Map return (Per-Field Parsers)
+            if result.get("type") == "map" and result.get("parsers"):
+                parsers_map = result["parsers"]
+                source_type = result["source_type"]
+                flags = result.get("flags", "")
+                
+                # Cache EACH field independently
+                for field, pattern in parsers_map.items():
+                    if source_type == "REGEX":
+                        stored_regex = f"(?{flags}){pattern}" if flags else pattern
+                    else:
+                        stored_regex = pattern # CSS selector
+                        
+                    db_utils.create_parser_cache_by_fields(
+                        db=db,
+                        domain=domain,
+                        fields=[field], # Single field
+                        generated_regex=stored_regex,
+                        source_type=source_type,
+                        created_by_task_id=task_id,
+                        test_matches_count=len(extracted_items),
+                        confidence_score=int(0.9 * 100),
+                        url_pattern=url_pattern,
+                        sample_input=source_content[:2000],
+                        sample_output=extracted_items[:10]
+                    )
+                
+                log_event(task_id, "parser_cached_map", domain=domain, fields=list(parsers_map.keys()))
+                
             else:
-                stored_regex = pattern
-            
-            # Confidence estimation
-            confidence = 0.9
-            
-            db_utils.create_parser_cache_by_fields(
-                db=db,
-                domain=domain,
-                fields=fields,
-                generated_regex=stored_regex,
-                source_type=source_type,
-                created_by_task_id=task_id,
-                test_matches_count=len(extracted_items),
-                confidence_score=int(confidence * 100),
-                url_pattern=url_pattern,
-                sample_input=source_content[:2000],
-                sample_output=extracted_items[:10]
-            )
-            log_event(task_id, "parser_cached", domain=domain, type=source_type, matches=len(extracted_items))
+                # Legacy / Single Pattern
+                pattern = result["pattern"]
+                source_type = result["source_type"] # CSS, JSONPATH, REGEX
+                flags = result.get("flags", "")
+                
+                # Store regex flags inline for DB compatibility
+                if source_type == "REGEX":
+                    stored_regex = f"(?{flags}){pattern}" if flags else pattern
+                else:
+                    stored_regex = pattern
+                
+                # Confidence estimation
+                confidence = 0.9
+                
+                db_utils.create_parser_cache_by_fields(
+                    db=db,
+                    domain=domain,
+                    fields=fields,
+                    generated_regex=stored_regex,
+                    source_type=source_type,
+                    created_by_task_id=task_id,
+                    test_matches_count=len(extracted_items),
+                    confidence_score=int(confidence * 100),
+                    url_pattern=url_pattern,
+                    sample_input=source_content[:2000],
+                    sample_output=extracted_items[:10]
+                )
+                log_event(task_id, "parser_cached", domain=domain, type=source_type, matches=len(extracted_items))
         else:
+             # handle error
             logger.warning(f"Parser generation failed: {result.get('error')}")
             log_event(task_id, "parser_generation_failed", error=result.get("error"))
             
