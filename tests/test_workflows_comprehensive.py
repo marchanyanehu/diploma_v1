@@ -32,7 +32,7 @@ class TestCheckCachedParser:
             result = workflows.check_cached_parser(
                 db=db_mock,
                 domain="example.com",
-                fields=["title", "price"],
+                fields=["title"],
                 search_content="<item>Product 1</item><item>Product 2</item>",
                 source_type="SEMANTIC",
                 min_matches=1

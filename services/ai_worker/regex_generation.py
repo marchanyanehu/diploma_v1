@@ -52,12 +52,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 import json
+import html
 import re
 
 __all__ = [
     "build_generation_messages",
     "build_refinement_messages",
     "validate_regex",
+    "validate_attribute_regex",
     "iterative_regex_generation",
 ]
 
@@ -86,6 +88,105 @@ def _examples_block(examples: Sequence[str]) -> str:
     return "\n".join(f"- {c}" for c in cleaned[:10])  # cap examples for token economy
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_text_for_compare(text: str, *, lowercase: bool = False) -> str:
+    """Normalize text for robust comparison between HTML-captured strings and LLM examples.
+
+    - strips HTML tags
+    - decodes HTML entities (&amp; -> &)
+    - normalizes whitespace
+    """
+    if not text:
+        return ""
+    # Strip HTML tags if the regex accidentally captured markup.
+    stripped = _TAG_RE.sub(" ", text)
+    # Decode entities (headless HTML commonly contains &amp; etc.)
+    stripped = html.unescape(stripped)
+    # Normalize whitespace incl. non-breaking space
+    stripped = stripped.replace("\xa0", " ")
+    stripped = _WS_RE.sub(" ", stripped).strip()
+    if lowercase:
+        stripped = stripped.lower()
+    return stripped
+
+
+def _find_example_position_in_source(source: str, example: str) -> int | None:
+    """Find an example text in raw HTML source.
+
+    Examples often come from LLM semantic text extraction (decoded entities), while the raw HTML
+    still contains entity-escaped variants. We try a few variants to locate the anchor.
+    """
+    if not example:
+        return None
+
+    candidates: list[str] = [example]
+    # HTML-escaped variants (important for & -> &amp; etc.).
+    escaped_no_quote = html.escape(example, quote=False)
+    if escaped_no_quote != example:
+        candidates.append(escaped_no_quote)
+    escaped_quote = html.escape(example, quote=True)
+    if escaped_quote not in candidates:
+        candidates.append(escaped_quote)
+
+    for cand in candidates:
+        idx = source.find(cand)
+        if idx != -1:
+            return idx
+
+    # Case-insensitive fallback
+    lower_source = source.lower()
+    for cand in candidates:
+        idx = lower_source.find(cand.lower())
+        if idx != -1:
+            return idx
+
+    return None
+
+
+def _select_snippet_from_source(source: str, examples: Sequence[str], *, max_len: int = 32000) -> str:
+    """Pick a snippet likely containing example anchors from a large HTML source.
+
+    This prevents prompting the LLM with unrelated <head> content when examples are far
+    down the document (common with headless full-page HTML).
+    """
+    # Try to anchor snippet around the first example we can locate in the source.
+    for ex in examples[:10]:
+        pos = _find_example_position_in_source(source, ex)
+        if pos is None:
+            continue
+
+        half = max_len // 2
+        start = max(0, pos - half)
+        end = min(len(source), start + max_len)
+        return source[start:end]
+
+    # Fallback: beginning of the document.
+    return source[:max_len]
+
+
+def _snippet_contains_any_example(snippet: str, examples: Sequence[str]) -> bool:
+    """Heuristic: does the provided snippet likely include the relevant region?
+
+    Callers may pass a snippet derived from semantic text (innerText). For raw HTML sources this
+    snippet can miss the actual anchors due to entity encoding differences. If we can't find any
+    example (or its escaped variant) in the snippet, we should re-select from the full source.
+    """
+    if not snippet:
+        return False
+    for ex in examples[:10]:
+        if not ex:
+            continue
+        if ex in snippet:
+            return True
+        escaped = html.escape(ex, quote=False)
+        if escaped != ex and escaped in snippet:
+            return True
+    return False
+
+
 def build_generation_messages(
     snippet: str,
     examples: Sequence[str],
@@ -110,8 +211,15 @@ def build_generation_messages(
         # Mark where examples appear in the snippet for clarity
         marked_snippet = snippet[:32000]
         for ex in examples:
-            if ex and ex in marked_snippet:
+            if not ex:
+                continue
+            # Prefer marking the exact example; fallback to marking its HTML-escaped variant.
+            if ex in marked_snippet:
                 marked_snippet = marked_snippet.replace(ex, f"[[EXAMPLE→]]{ex}[[←EXAMPLE]]", 1)
+                continue
+            escaped = html.escape(ex, quote=False)
+            if escaped != ex and escaped in marked_snippet:
+                marked_snippet = marked_snippet.replace(escaped, f"[[EXAMPLE→]]{escaped}[[←EXAMPLE]]", 1)
         
         # Detect if example is multi-line (spans multiple HTML elements)
         has_multiline_example = any('\n' in ex for ex in examples if ex)
@@ -212,6 +320,11 @@ def validate_regex(
     if not pattern or len(pattern) > 500:
         result["issues"].append("Pattern empty or too long (>500 chars)")
         return result
+
+    # Simple catastrophic backtracking heuristic (cheap, not exhaustive)
+    if re.search(r"\(\s*\.\*\s*\)\s*\*|\(\s*\.\+\s*\)\s*\+|\(\s*\.\*\s*\)\s*\+|\(\s*\.\+\s*\)\s*\*", pattern):
+        result["issues"].append("Potential catastrophic quantifier nesting detected")
+        return result
         
     # 2. Compile Regex
     re_flags = 0
@@ -236,9 +349,13 @@ def validate_regex(
                 
             # Prefer capturing group 1 if present, else whole match
             if m.lastindex and m.lastindex >= 1:
-                matches.append(m.group(1))
+                val = m.group(1)
             else:
-                matches.append(m.group(0))
+                val = m.group(0)
+
+            if val is None:
+                continue
+            matches.append(val.strip())
     except Exception as e:
         result["error"] = f"Runtime match error: {str(e)}"
         return result
@@ -246,7 +363,8 @@ def validate_regex(
     # Filter out None values from matches (can happen with optional capture groups)
     matches = [m for m in matches if m is not None]
     result["matches"] = matches
-    result["distinct_matches"] = list(set(matches))
+    # Preserve order while deduping
+    result["distinct_matches"] = list(dict.fromkeys(matches))
     
     # 4. Check Constraints
     if not matches:
@@ -270,43 +388,41 @@ def validate_regex(
     # We normalize for comparison if case-insensitive flag is set
     # Note: Examples might be substrings of the full match or exact matches.
     # For HTML content, we also check if the TEXT CONTENT matches (ignoring HTML tags)
-    
-    def _strip_html_and_normalize(text: str) -> str:
-        """Strip HTML tags and normalize whitespace for comparison."""
-        import re as _re
-        # Remove HTML tags
-        stripped = _re.sub(r'<[^>]+>', ' ', text)
-        # Normalize whitespace (newlines, multiple spaces -> single space)
-        stripped = _re.sub(r'\s+', ' ', stripped).strip()
-        return stripped
-    
+
     missing = []
-    # Optimization: use set for fast lookups
-    match_set = set(matches)
-    if 'i' in flags:
-        match_set = {m.lower() for m in matches}
-    
-    # Also create normalized versions for HTML comparison
-    normalized_matches = [_strip_html_and_normalize(m) for m in matches]
-    if 'i' in flags:
-        normalized_matches = [m.lower() for m in normalized_matches]
+    lowercase = 'i' in flags
+
+    # Optimization: sets for fast lookups
+    raw_match_set = {m.lower() for m in matches} if lowercase else set(matches)
+    normalized_matches = [_normalize_text_for_compare(m, lowercase=lowercase) for m in matches]
+    normalized_match_set = set(normalized_matches)
         
     for ex in examples:
-        if not ex: continue
-        check_ex = ex if 'i' not in flags else ex.lower()
-        normalized_ex = _strip_html_and_normalize(check_ex)
-        
-        # Check 1: Exact match
-        if check_ex in match_set:
+        if not ex:
+            continue
+
+        check_ex = ex.lower() if lowercase else ex
+        normalized_ex = _normalize_text_for_compare(ex, lowercase=lowercase)
+        if not normalized_ex:
+            continue
+
+        # Check 1: Exact raw match
+        if check_ex in raw_match_set:
             continue
             
-        # Check 2: Normalized text content match (handles HTML captures)
+        # Check 2: Exact normalized match (handles entities, whitespace, accidental markup)
+        if normalized_ex in normalized_match_set:
+            continue
+
+        # Check 3: Normalized containment (tolerant for cases where capture includes extra nearby text)
         found = False
         for norm_match in normalized_matches:
-            # Check if normalized example is contained in normalized match
+            if not norm_match:
+                continue
             if normalized_ex in norm_match or norm_match in normalized_ex:
                 found = True
                 break
+
             # Also check first significant part (for multi-line examples)
             first_part = normalized_ex.split('.')[0].strip() if '.' in normalized_ex else normalized_ex[:50]
             if len(first_part) > 10 and first_part in norm_match:
@@ -330,6 +446,120 @@ def validate_regex(
     if not result["issues"] and not result["error"]:
         result["success"] = True
         
+    return result
+
+
+def validate_attribute_regex(
+    pattern: str,
+    source: str,
+    anchors: Sequence[str],
+    *,
+    flags: str = "",
+    max_matches: int = 200,
+    anchor_window: int = 8000,
+    min_anchor_coverage: float = 0.6,
+) -> Dict[str, Any]:
+    """Validate attribute-extraction regexes (href/src/etc.) against raw HTML.
+
+    In this mode, provided `anchors` are *not* the captured values. They are nearby texts that should
+    help localize the target attribute. We validate by requiring the regex to find at least one match
+    in a window around a significant fraction of anchors.
+
+    Returns a dict similar to `validate_regex` with additional anchor diagnostics.
+    """
+    result: Dict[str, Any] = {
+        "success": False,
+        "matches": [],
+        "issues": [],
+        "error": None,
+        "missing_anchors": [],
+        "anchor_found": 0,
+        "anchor_covered": 0,
+        "anchor_coverage": 0.0,
+        "pattern": pattern,
+    }
+
+    if not pattern or len(pattern) > 500:
+        result["issues"].append("Pattern empty or too long (>500 chars)")
+        return result
+
+    # Compile Regex
+    re_flags = 0
+    if 'i' in flags: re_flags |= re.IGNORECASE
+    if 'm' in flags: re_flags |= re.MULTILINE
+    if 's' in flags: re_flags |= re.DOTALL
+    try:
+        rx = re.compile(pattern, re_flags)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    # Collect matches from the full source (capped)
+    matches: list[str] = []
+    try:
+        for i, m in enumerate(rx.finditer(source)):
+            if i >= max_matches:
+                result["issues"].append(f"Too many matches (capped at {max_matches})")
+                break
+            val = m.group(1) if (m.lastindex and m.lastindex >= 1) else m.group(0)
+            if val is None:
+                continue
+            matches.append(val.strip())
+    except Exception as e:
+        result["error"] = f"Runtime match error: {str(e)}"
+        return result
+
+    matches = [m for m in matches if m]
+    result["matches"] = matches
+    result["distinct_matches"] = list(dict.fromkeys(matches))
+
+    if not matches:
+        result["issues"].append("No matches found in source")
+        return result
+
+    # Anchor coverage check
+    found = 0
+    covered = 0
+    missing_anchors: list[str] = []
+
+    half = max(500, anchor_window // 2)
+    for a in anchors:
+        if not a:
+            continue
+        pos = _find_example_position_in_source(source, a)
+        if pos is None:
+            missing_anchors.append(a)
+            continue
+
+        found += 1
+        start = max(0, pos - half)
+        end = min(len(source), pos + half)
+        window_text = source[start:end]
+
+        if rx.search(window_text):
+            covered += 1
+
+    result["missing_anchors"] = missing_anchors
+    result["anchor_found"] = found
+    result["anchor_covered"] = covered
+    result["anchor_coverage"] = (covered / found) if found else 0.0
+
+    if found == 0:
+        result["issues"].append("None of the provided anchors were found in source")
+    elif result["anchor_coverage"] < min_anchor_coverage:
+        result["issues"].append(
+            f"Low anchor coverage: {covered}/{found} anchors had a nearby match (threshold {min_anchor_coverage})"
+        )
+
+    # Attribute extraction patterns should not be wildly broad.
+    unique = len(set(matches))
+    broad_threshold = max(found * 50, 500)  # generous but still blocks 'everything in <head>' patterns
+    if unique > broad_threshold:
+        result["issues"].append(f"Pattern too broad for attribute mode: {unique} unique matches (threshold {broad_threshold})")
+
+    if not result["issues"] and not result["error"]:
+        result["success"] = True
+
     return result
 
 def _extract_json(raw: str) -> Dict[str, Any]:
@@ -367,8 +597,13 @@ def iterative_regex_generation(
     """Run iterative loop until success or exhaustion."""
     if not examples:
         return {"success": False, "error": "no examples"}
-    # Ensure snippet_used is robust for JSON/large content
-    snippet_used = snippet if snippet is not None and len(snippet) > 100 else source[:32000]
+    # Ensure snippet_used is robust for JSON/large content:
+    # - callers may pass a snippet that doesn't contain anchors due to HTML entity encoding
+    # - for large raw HTML, we must pick a window around the anchors (examples)
+    if snippet is not None and len(snippet) > 100 and _snippet_contains_any_example(snippet, examples):
+        snippet_used = snippet
+    else:
+        snippet_used = _select_snippet_from_source(source, examples)
     attempts: List[Dict[str, Any]] = []
 
     gen_messages = build_generation_messages(
@@ -397,26 +632,10 @@ def iterative_regex_generation(
     # We'll relax validation for attribute mode or need a different validator.
     # For now, we use the standard validator but might ignore "missing_examples" if we find *something*.
     
-    val = validate_regex(pattern, source, examples, flags=flags)
-    
-    # Special validation logic for attribute extraction
     if is_attribute_extraction:
-        # If we found matches (URLs) but they don't equal the examples (Titles), that's EXPECTED.
-        # We treat it as success if we got matches and the regex seems valid.
-        if val["matches"] and not val.get("error"):
-             val["success"] = True
-             val["issues"] = [] # Clear issues since mismatch is expected
-    
-    # For multi-field extraction, relax validation if we got reasonable matches
-    # The examples might contain unicode/special chars that don't match exactly
-    if not is_attribute_extraction and val["matches"] and not val.get("error"):
-        # Check if we got reasonable number of matches (at least as many as examples)
-        if len(val["matches"]) >= len(examples):
-            # Only fail if pattern is clearly too generic (high duplication)
-            dup_issues = [i for i in val.get("issues", []) if "duplication" in i.lower()]
-            if not dup_issues:
-                val["success"] = True
-                val["issues"] = [i for i in val.get("issues", []) if "missing" not in i.lower()]
+        val = validate_attribute_regex(pattern, source, examples, flags=flags)
+    else:
+        val = validate_regex(pattern, source, examples, flags=flags)
     
     attempts.append({"stage": "initial", "raw": raw, "parsed": parsed, "validation": val})
     if val.get("success"):
@@ -451,11 +670,10 @@ def iterative_regex_generation(
         flags_ref = str(parsed_ref.get("flags", "s"))
         if "s" not in flags_ref.lower():
             flags_ref = flags_ref + "s"
-        val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref)
-        
-        if is_attribute_extraction and val_ref["matches"] and not val_ref.get("error"):
-             val_ref["success"] = True
-             val_ref["issues"] = []
+        if is_attribute_extraction:
+            val_ref = validate_attribute_regex(pattern_ref, source, examples, flags=flags_ref)
+        else:
+            val_ref = validate_regex(pattern_ref, source, examples, flags=flags_ref)
 
         attempts.append(
             {

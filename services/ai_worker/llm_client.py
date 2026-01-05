@@ -369,3 +369,21 @@ class LLMClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         return self.chat(messages, **kwargs)
+
+    # ---------------------------------------------------------------------
+    # Backwards compatibility
+    # ---------------------------------------------------------------------
+
+    def generate(  # type: ignore[no-untyped-def]
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Backward-compatible alias for older code paths expecting `LLMClient.generate()`.
+
+        Historically parts of the worker stack called `.generate(prompt)`; the current
+        interface is `.generate_text(prompt)` / `.chat(messages)`.
+        """
+        return self.generate_text(prompt, system=system, **kwargs)

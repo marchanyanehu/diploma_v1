@@ -17,12 +17,37 @@ def strip_html_to_text(html: str) -> str:
     return text
 
 def decompose_stored_regex(stored: str) -> tuple[str, str]:
-    m = re.match(r"\(\?([ims]+):(.*)\)$", stored)
+    """Split a stored regex into (pattern, flags).
+
+    Supports these encodings:
+    - `(?is)<item>(.*?)</item>`  (inline flags at start)
+    - `(?is:<item>(.*?)</item>)` (scoped flags group)
+
+    If no flags prefix is detected, returns (stored, "").
+    """
+    if not stored:
+        return "", ""
+
+    # 1) Scoped group form: (?ims:...)
+    m = re.match(r"^\(\?([ims]+):(.*)\)$", stored, flags=re.DOTALL)
     if m:
         return m.group(2), m.group(1)
+
+    # 2) Inline flags at start: (?ims)rest...
+    m = re.match(r"^\(\?([ims]+)\)(.*)$", stored, flags=re.DOTALL)
+    if m:
+        return m.group(2), m.group(1)
+
     return stored, ""
 
-def apply_regex_matches(pattern: str, flags: str, source: str) -> list[str]:
+def apply_regex_matches(
+    pattern: str,
+    flags: str,
+    source: str,
+    *,
+    fields: list[str] | None = None,
+    max_matches: int = 5000,
+) -> list[Dict[str, Any]]:
     re_flags = 0
     if 'i' in flags: re_flags |= re.IGNORECASE
     if 'm' in flags: re_flags |= re.MULTILINE
@@ -31,12 +56,44 @@ def apply_regex_matches(pattern: str, flags: str, source: str) -> list[str]:
         rx = re.compile(pattern, re_flags)
     except Exception:
         return []
-    out: list[str] = []
-    for m in rx.finditer(source):
-        if m.lastindex and m.lastindex >= 1:
-            out.append(m.group(1))
+
+    out: list[Dict[str, Any]] = []
+    for i, m in enumerate(rx.finditer(source)):
+        if i >= max_matches:
+            break
+
+        groupdict = m.groupdict() or {}
+        extracted_fields: Dict[str, Any] = {}
+
+        if groupdict:
+            # Named groups are the canonical multi-field format.
+            extracted_fields = {k: (v.strip() if isinstance(v, str) else v) for k, v in groupdict.items()}
         else:
-            out.append(m.group(0))
+            # Fallback for single-field patterns: use group(1) if present else whole match.
+            val = m.group(1) if (m.lastindex and m.lastindex >= 1) else m.group(0)
+            if isinstance(val, str):
+                val = val.strip()
+            if fields and len(fields) == 1:
+                extracted_fields = {fields[0]: val}
+            elif val is not None:
+                extracted_fields = {"value": val}
+
+        # Build a stable text representation
+        if extracted_fields and fields:
+            text_repr = " | ".join(f"{f}: {extracted_fields.get(f, '')}" for f in fields if extracted_fields.get(f) not in (None, ""))
+        else:
+            text_repr = ""
+        if not text_repr:
+            text_repr = " | ".join(f"{k}: {v}" for k, v in extracted_fields.items() if v not in (None, "")) or ""
+
+        out.append(
+            {
+                "text": text_repr,
+                "fields": extracted_fields,
+                "source": "cache",
+                "confidence": 0.95,
+            }
+        )
     return out
 
 def log_event(task_id: str, event: str, **fields) -> None:

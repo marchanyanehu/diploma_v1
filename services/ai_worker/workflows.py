@@ -44,13 +44,14 @@ def check_cached_parser(
     
     for p in parsers:
         patt, fl = decompose_stored_regex(cast(str, p.generated_regex))
-        matches = apply_regex_matches(patt, fl, search_content)
+        matches = apply_regex_matches(patt, fl, search_content, fields=fields)
         
         # Validate: enough matches and fields present
         if matches and len(matches) >= min_matches:
             # Check if all requested fields are in the matches
-            if matches[0].get("fields"):
-                matched_fields = set(matches[0]["fields"].keys())
+            first = matches[0]
+            if isinstance(first, dict) and first.get("fields"):
+                matched_fields = set((first.get("fields") or {}).keys())
                 if set(fields).issubset(matched_fields):
                     try:
                         db_utils.update_parser_usage(db, p.id)
