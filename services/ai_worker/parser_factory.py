@@ -94,13 +94,29 @@ def generate_parser(
     # 4. Fallback: Regex
     # Regex works for everything (brute force)
     logger.info("Falling back to Regex generation...")
-    result = regex_generation.iterative_regex_generation(
-        source=content,
-        examples=examples,
-        target_desc=target_desc,
-        llm=llm,
-        max_iterations=2
-    )
+    
+    # Check if we have multi-field structured examples -> Use Composite Strategy
+    is_multi_field = False
+    if examples and isinstance(examples[0], dict) and len(examples[0]) > 1:
+        is_multi_field = True
+        
+    if is_multi_field:
+        logger.info("Using Composite Regex Strategy for multi-field extraction")
+        result = regex_generation.generate_composite_regex(
+            source=content,
+            examples=examples,
+            target_desc=target_desc,
+            llm=llm
+        )
+    else:
+        # Standard iterative generation
+        result = regex_generation.iterative_regex_generation(
+            source=content,
+            examples=examples,
+            target_desc=target_desc,
+            llm=llm,
+            max_iterations=2
+        )
     
     if result.get("success"):
         return {

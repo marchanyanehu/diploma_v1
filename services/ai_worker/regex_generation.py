@@ -54,6 +54,9 @@ from typing import Any, Dict, List, Sequence
 import json
 import html
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_generation_messages",
@@ -779,4 +782,137 @@ def iterative_regex_generation(
     return {"success": False, "attempts": attempts, "final_pattern": None, "final_flags": None}
 
 
-# End of module
+def generate_composite_regex(
+    source: str,
+    examples: Sequence[Dict[str, Any]],
+    *,
+    target_desc: str,
+    llm: Any,
+) -> Dict[str, Any]:
+    """Generate a composite regex for multi-field extraction.
+    
+    Strategy:
+    1. Determine field order from the first example.
+    2. Generate an optimum regex for EACH field independently.
+    3. Concatenate them with `.*?` (non-greedy match).
+    4. Validate the combined regex.
+    """
+    if not examples or not isinstance(examples[0], dict):
+        return {"success": False, "error": "Composite generation requires dict examples"}
+
+    # 1. Determine Field Order
+    first_ex = examples[0]
+    field_positions = []
+    
+    # We do a simple find for the values of the first example to guess order
+    search_window = source[:50000] # Cap search window
+    for key, val in first_ex.items():
+        if not val or not isinstance(val, str):
+            continue
+        # Use existing helper to find position (handles encoding)
+        pos = _find_example_position_in_source(search_window, val)
+        if pos is not None:
+            field_positions.append((pos, key))
+            
+    # Sort by position
+    field_positions.sort()
+    ordered_keys = [k for _, k in field_positions]
+    
+    if not ordered_keys:
+        return {"success": False, "error": "Could not locate example fields in source to determine order"}
+    
+    logger.info(f"Composite Regex: Determined field order: {ordered_keys}")
+    
+    component_patterns = []
+    
+    # 2. Generate Component Regexes
+    for key in ordered_keys:
+        # Prepare examples for just this field
+        field_examples = [ex.get(key) for ex in examples if ex.get(key)]
+        field_target = f"field '{key}'"
+        
+        # We recursively call the iterative generator for this single field
+        # We ask for a simple capturing group, we will rename it later
+        result = iterative_regex_generation(
+            source=source,
+            examples=field_examples,
+            target_desc=field_target,
+            llm=llm,
+            max_iterations=1, # Speed optimization: trust the first shot or fail
+            expected_fields=None # Single field mode
+        )
+        
+        if not result.get("success"):
+            logger.warning(f"Failed to generate regex for component field '{key}'")
+            return {"success": False, "error": f"Failed to generate regex for field '{key}'"}
+        
+        pattern = result["final_pattern"]
+        
+        # Transform the capture group to a named group: (subexpr) -> (?P<key>subexpr)
+        # We blindly replace the first unescaped '(' that starts a group. 
+        # But wait, iterative_regex_generation might return `href="([^"]+)"`.
+        # We need to inject `?P<key>` into the capturing group.
+        
+        # Heuristic: Find the first capturing group `(` that is NOT `(?:`, `(?P`, `(?=` etc.
+        # This is tricky with regex string parsing. 
+        # Simpler approach: Ask LLM to generate named group? 
+        # OR: Just assume the LLM output `...(...) ...` and we replace the first `(` with `(?P<key>`.
+        
+        # Let's try to verify if it already has a named group (unlikely for single field unless prompted)
+        if f"?P<{key}>" in pattern:
+            component_patterns.append(pattern)
+            continue
+            
+        # Inject name into first capturing group
+        # Look for ( but not (?
+        # We use a placeholder to avoid messing up nested groups or escaped parens
+        # Note: This is brittle. A better way would be to ask iterative_regex_generation to force a named group.
+        # BUT, let's try a regex modification.
+        
+        # Scan for first `(` that is not `\(`, not followed by `?`.
+        injected = False
+        chars = list(pattern)
+        for i, char in enumerate(chars):
+            if char == '(' and (i == 0 or chars[i-1] != '\\'):
+                # Check next char
+                if i + 1 < len(chars) and chars[i+1] != '?':
+                    # FOUND IT! Insert ?P<key>
+                    # We inject it into the string
+                    component_patterns.append(pattern[:i+1] + f"?P<{key}>" + pattern[i+1:])
+                    injected = True
+                    break
+        
+        if not injected:
+            # Fallback: Wrap the whole thing? No, that captures context too.
+            # If no capturing group found, we wrap the whole thing? No, validation would have failed.
+            # Maybe it used a named group with a different name?
+            # Try appending the group name replacement to the first group regardless?
+            # Let's hope validation catches if we broke it.
+            # actually, maybe we should just wrap the *entire regex* in (?P<key>...)?
+            # No, because the regex usually includes context like `href="..."`. We only want the specific capture.
+            # Since `iterative_regex_generation` validates that it matches the example, and `REGEX_GENERATION_RULES` says "Use capturing groups ONLY for the target values", we can be reasonably sure strict capturing groups exist.
+            component_patterns.append(pattern) 
+            
+    # 3. Concatenate
+    # We use non-greedy dotall match between components
+    final_regex = "(?s)" + ".*?".join(component_patterns)
+    
+    # 4. Final Validation
+    logger.info(f"Composite Regex Candidate: {final_regex[:200]}...")
+    val = validate_regex(
+        final_regex, 
+        source, 
+        examples, 
+        flags="s",
+        expected_fields=ordered_keys
+    )
+    
+    if val["success"]:
+        return {
+            "success": True,
+            "final_pattern": final_regex,
+            "final_flags": "s",
+            "attempts": [{"stage": "composite", "components": component_patterns}]
+        }
+        
+    return {"success": False, "error": "Composite validation failed", "issues": val.get("issues")}
