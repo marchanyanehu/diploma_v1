@@ -6,7 +6,6 @@ from typing import List, Dict, Any, Optional, cast
 
 from .llm_client import LLMClient
 import shared.database as db_utils
-from . import regex_generation
 from . import parser_factory
 from .prompts import (
     SCHEMA_EXTRACTION_SYSTEM_PROMPT,
@@ -30,10 +29,6 @@ def check_cached_parser(
     
     # Generic lookup
     parsers = db_utils.find_cached_parser_by_fields(db, domain, fields, source_type, url_pattern=url_pattern)
-    
-    if not parsers and source_type == "SEMANTIC":
-        # Fallback to check other types if SEMANTIC was vaguely requested
-        pass
 
     for p in parsers:
         # Determine strategy from stored parser
@@ -41,12 +36,12 @@ def check_cached_parser(
         pattern = p.generated_regex
         flags = ""
         
-        # Legacy regex handling
+        # Regex patterns with inline flags
         if p_type in ["SEMANTIC", "REGEX", "HTML"] and "(?" in pattern:
             patt, flags = decompose_stored_regex(cast(str, pattern))
             matches = parser_factory.execute_parser("REGEX", patt, search_content, flags)
         elif p_type in ["SEMANTIC", "REGEX", "HTML"]:
-             # Plain regex without flags prefix
+            # Plain regex without flags prefix
             matches = parser_factory.execute_parser("REGEX", pattern, search_content)
         else:
             # CSS / JSONPATH
@@ -225,7 +220,7 @@ def _cache_parser_from_extraction(
             source_type = result["source_type"] # CSS, JSONPATH, REGEX
             flags = result.get("flags", "")
             
-            # Legacy regex compat in DB: store flags inline
+            # Store regex flags inline for DB compatibility
             if source_type == "REGEX":
                 stored_regex = f"(?{flags}){pattern}" if flags else pattern
             else:
@@ -292,19 +287,13 @@ CONTENT:
         examples = keywords[:3]
     
     all_matches = []
-    # Note: Refactoring field extraction to use factory would be ideal but sticking to minimum changes.
-    # We will just leave legacy regex here to minimize risk for this precise tool call
-    # unless requested. The user prompt focused on "caching approach".
-    
-    # Use legacy regex direct call for now to keep this function working as is
-    # or redirect to factory? Factory is safer.
     
     for field in keywords:
         field_examples = [ex for ex in examples if field.lower() in ex.lower()][:3]
         if not field_examples:
             field_examples = [field]
         
-        # We can use factory here too!
+        # Use parser factory for consistent parser generation
         result = parser_factory.generate_parser(
              content=search_content,
              examples=field_examples,

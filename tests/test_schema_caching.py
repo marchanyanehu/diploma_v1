@@ -18,7 +18,7 @@ def test_field_based_cache_hit(mock_llm_cls, mock_db_utils):
     mock_parser = MagicMock()
     mock_parser.id = 1
     mock_parser.generated_regex = r"(?s)Title:\s*([^\n]+)\n.*?Price:\s*([^\n]+)"
-    
+    mock_parser.source_type = "SEMANTIC"    
     mock_db_utils.find_cached_parser_by_fields.return_value = [mock_parser]
     
     # Mock successful regex matches
@@ -83,7 +83,7 @@ def test_field_based_cache_invalidation(mock_db_utils):
     mock_parser = MagicMock()
     mock_parser.id = 1
     mock_parser.generated_regex = r"(?s)INVALID_PATTERN"
-    
+    mock_parser.source_type = "SEMANTIC"    
     mock_db_utils.find_cached_parser_by_fields.return_value = [mock_parser]
     
     # Mock failed regex matches (no matches or missing fields)

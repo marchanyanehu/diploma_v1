@@ -1,10 +1,10 @@
-"""Regex Generation & Refinement (Tasks #406-#409)
+"""Regex Generation & Refinement Module
 
 This module provides:
-1. Prompt engineering helpers for initial regex generation (Task #406)
-2. Validation logic to test a candidate regex against full source content (Task #407)
-3. Refinement ("fix-it") prompt builder to correct faulty regexes (Task #408)
-4. Iterative loop: Generate -> Validate -> (Refine -> Validate)* (Task #409)
+1. Prompt engineering helpers for initial regex generation
+2. Validation logic to test a candidate regex against full source content
+3. Refinement ("fix-it") prompt builder to correct faulty regexes
+4. Iterative loop: Generate -> Validate -> (Refine -> Validate)*
 
 Design goals:
 - Deterministic JSON protocol between our code and the LLM (NO prose)
@@ -42,7 +42,7 @@ Assumptions:
   - examples list already filtered / representative by previous pipeline steps
   - source may be large; we only collect up to max_matches matches to avoid memory blow-up
 
-Future improvements (out of current task scope):
+Future improvements:
   - Structural hints (HTML/JSON context) to bias toward more precise patterns
   - Multi-phase ranking of alternative regex candidates
   - Token / AST-level safety scanning

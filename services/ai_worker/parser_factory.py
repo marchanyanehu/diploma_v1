@@ -14,7 +14,7 @@ try:
 except ImportError:
     parse_app = None
 
-# Import legacy regex generation as fallback
+# Import regex generation as fallback strategy
 from . import regex_generation
 from . import css_selector_generation
 from . import json_path_generation
@@ -91,11 +91,9 @@ def generate_parser(
         else:
             logger.warning("jsonpath-ng not installed, skipping JSONPath generation.")
 
-    # 4. Fallback: Regex (Legacy)
+    # 4. Fallback: Regex
     # Regex works for everything (brute force)
     logger.info("Falling back to Regex generation...")
-    # Prepare legacy args
-    # Legacy code expects examples to be strings usually, but dicts are handled
     result = regex_generation.iterative_regex_generation(
         source=content,
         examples=examples,
@@ -165,10 +163,9 @@ def execute_parser(
             logger.error(f"JSONPath execution failed: {e}")
             return []
             
-    # Strategy: REGEX
-    elif source_type in ["REGEX", "SEMANTIC", "HTML", "JSON"]: # Legacy compat
+    # Strategy: REGEX (handles SEMANTIC, HTML, JSON stored as regex patterns)
+    elif source_type in ["REGEX", "SEMANTIC", "HTML", "JSON"]:
         from .utils import apply_regex_matches
-        # For legacy regex, we use existing utility
         raw_matches = apply_regex_matches(pattern, flags, content)
         matches = raw_matches # structured dicts
 
