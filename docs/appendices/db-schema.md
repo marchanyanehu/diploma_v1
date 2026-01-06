@@ -8,12 +8,14 @@
 
 ## Entity Relationship Diagram
 
+```mermaid
 erDiagram  
     USERS ||--o{ SCRAPING_TASKS : owns  
     USERS ||--o{ SCHEDULED_JOBS : owns  
     SCRAPING_TASKS }o--|| TASK_SOURCE_DATA : has  
     SCRAPING_TASKS }o--|| TASK_INTENTS : has  
     SCRAPING_TASKS }o--|| PARSERS_CACHE : uses
+```
 
 _Figure: Simplified ER diagram showing core relationships (User-Tasks-Jobs, and task dependencies)._
 
@@ -70,8 +72,6 @@ Normalizes the components of user prompts. Each task may reference one intent.
 | constraints | JSON | NULLABLE | Additional conditions (e.g. filters) |
 | output_shape | TEXT | NULLABLE | Human-readable description of output |
 | normalized_hash | VARCHAR | NULLABLE INDEX | Hash for intent matching |
-
-_(plus timestamps and other columns for processing hints)※__\[89\]__._
 
 ### task_source_data
 
@@ -132,8 +132,6 @@ Stores user-defined cron tasks.
 - **ScrapingTask → TaskIntent:** Many tasks can share one intent (the normalized prompt).
 - **ScrapingTask → ParserCache:** (Optional) Many tasks can reuse the same parser entry.
 - **ScheduledJobs → (ScrapingTask):** Jobs spawn new tasks on schedule (history in separate log table, not shown).
-
-_(For full schema details, see the source: shared/database/models.py__\[94\]__\[48\]__.)_
 
 ## Migrations
 

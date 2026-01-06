@@ -9,41 +9,49 @@
 - **Authentication**: Ensure you have a valid JWT token (see User Guide).
 - **Submit Task**:
 
-- curl -X POST "<http://localhost:8000/api/v1/process>" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN" \\  
-    \-H "Content-Type: application/json" \\  
-    \-d '{  
-    "url": "<https://news.example.com>",  
+```bash
+curl -X POST "http://localhost:8000/api/v1/process" \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{  
+    "url": "https://news.example.com",  
     "prompt": "Find all article headlines and their publication dates"  
     }'
+```
 
-- A successful request returns {"task_id": "...", "status": "PENDING", "message": "Task created successfully"}.
+- A successful request returns `{"task_id": "...", "status": "PENDING", "message": "Task created successfully"}`.
 - **Poll Status**:
 
-- curl -X GET "<http://localhost:8000/api/v1/status/&lt;task_id>&gt;" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN"
+```bash
+curl -X GET "http://localhost:8000/api/v1/status/<task_id>" \
+    -H "Authorization: Bearer YOUR_TOKEN"
+```
 
 - Repeat until status becomes SUCCESS or FAILED.
 - Possible statuses: PENDING, IN_PROGRESS, SUCCESS, FAILED.
 - **Get Results**:
 
-- curl -X GET "<http://localhost:8000/api/v1/result/&lt;task_id>&gt;" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN"
+```bash
+curl -X GET "http://localhost:8000/api/v1/result/<task_id>" \
+    -H "Authorization: Bearer YOUR_TOKEN"
+```
 
 - On success, receives JSON like:
 
-- {  
+```json
+{  
     "task_id": "...",  
     "status": "SUCCESS",  
-    "url": "<https://news.example.com>",  
+    "url": "https://news.example.com",  
     "prompt": "Find all article headlines and their dates",  
-    "data": \[  
-    {"text": "Title 1", "source": "generated_regex", "confidence": 0.95},  
-    {"text": "Title 2", "source": "generated_regex", "confidence": 0.93}  
-    \],  
+    "data": [  
+        {"text": "Title 1", "source": "generated_regex", "confidence": 0.95},  
+        {"text": "Title 2", "source": "generated_regex", "confidence": 0.93}  
+    ],  
     "metadata": {"total_matches": 2, "used_cached_parser": false},  
     "processing_time": 4.2  
-    }
+}
+```
 
 - The data array contains extracted items with their confidence scores.
 
@@ -59,27 +67,33 @@
 
 - **Create a Scheduled Job**:
 
-- curl -X POST "<http://localhost:8000/api/v1/jobs>" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN" \\  
-    \-H "Content-Type: application/json" \\  
-    \-d '{  
-    "url": "<https://prices.example.com/daily>",  
+```bash
+curl -X POST "http://localhost:8000/api/v1/jobs" \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{  
+    "url": "https://prices.example.com/daily",  
     "prompt": "Get latest product prices",  
-    "schedule_cron": "0 9 \* \* \*"  
+    "schedule_cron": "0 9 * * *"  
     }'
+```
 
-- schedule_cron uses standard cron syntax (minute hour day month weekday).
-- Example "0 9 \* \* \*" = every day at 9:00 AM.
+- `schedule_cron` uses standard cron syntax (minute hour day month weekday).
+- Example `"0 9 * * *"` = every day at 9:00 AM.
 - **List Scheduled Jobs**:
 
-- curl -X GET "<http://localhost:8000/api/v1/jobs>" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN"
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs" \
+    -H "Authorization: Bearer YOUR_TOKEN"
+```
 
 - Returns a list of your jobs with their id, url, prompt, schedule_cron, next run time, etc.
 - **Delete a Scheduled Job**:
 
-- curl -X DELETE "<http://localhost:8000/api/v1/jobs/1>" \\  
-    \-H "Authorization: Bearer YOUR_TOKEN"
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/jobs/1" \
+    -H "Authorization: Bearer YOUR_TOKEN"
+```
 
 - Deletes job with ID 1. Returns confirmation message.
 

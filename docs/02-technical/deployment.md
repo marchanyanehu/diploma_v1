@@ -4,24 +4,26 @@
 
 The system is deployed as Docker containers (API, Redis, Postgres, Workers, Scheduler) connected via a Docker network. A high-level deployment architecture:
 
+```mermaid
 flowchart LR  
 subgraph "Cloud/Server/VM"  
-API\["API Container (FastAPI)"\]  
-Redis\["Redis (Broker/Cache)"\]  
-Postgres\["Postgres DB"\]  
-Scheduler\["Scheduler Container (Celery Beat)"\]  
-Headless\["Headless Worker Container"\]  
-AIWorker\["AI Worker Container"\]  
-Network\[(Docker Network)\]  
+API["API Container (FastAPI)"]  
+Redis["Redis (Broker/Cache)"]  
+Postgres["Postgres DB"]  
+Scheduler["Scheduler Container (Celery Beat)"]  
+Headless["Headless Worker Container"]  
+AIWorker["AI Worker Container"]  
+Network["(Docker Network)"]  
 end  
-Browser\["User (via HTTP)"\] -->|HTTP| API  
+Browser["User (via HTTP)"] -->|HTTP| API  
 API -->|SQL| Postgres  
 API -->|CELERY| Redis  
 Scheduler -->|CELERY| Redis  
 Redis -->|fetching_queue| Headless  
 Redis -->|ai_queue| AIWorker  
-Headless -->|Fetch Web| Internet\["Target Websites"\]  
+Headless -->|Fetch Web| Internet["Target Websites"]  
 AIWorker -->|(calls LLM API)| Internet
+```
 
 - **Containers:**
 - **PostgreSQL** (diploma_postgres): on port 5432. Stores all data. Healthchecks ensure readiness.
@@ -51,7 +53,7 @@ A CI/CD pipeline (e.g., GitHub Actions) can automate builds and tests on each pu
 
 - **Commit / PR** triggers pipeline.
 - **Build**: Check out code, set up Python/Docker environment.
-- **Lint**: Run black --check, flake8, etc. to enforce code style.
+- **Lint**: Run black --check, ruff, etc. to enforce code style.
 - **Test**: Run pytest (unit & integration tests) to ensure no regressions.
 - **Security Scan**: (Optional) Use tools like \[Bandit/Snyk\] for vulnerability scanning.
 - **Build & Push Docker Images**: If on main branch, build Docker images and push to registry.
@@ -59,24 +61,26 @@ A CI/CD pipeline (e.g., GitHub Actions) can automate builds and tests on each pu
 
 ### Pipeline Configuration (Example: .github/workflows/ci.yml)
 
+```yaml
 name: CI/CD Pipeline  
-on: \[push, pull_request\]  
+on: [push, pull_request]  
 jobs:  
-build-test:  
-runs-on: ubuntu-latest  
-steps:  
-\- uses: actions/checkout@v3  
-\- name: Set up Python 3.11  
-uses: actions/setup-python@v4  
-with: {python-version: 3.11}  
-\- name: Install dependencies  
-run: pip install -r requirements.txt  
-\- name: Lint  
-run: |  
-black --check .  
-flake8 .  
-\- name: Run tests  
-run: pytest --cov=./
+  build-test:  
+    runs-on: ubuntu-latest  
+    steps:  
+      - uses: actions/checkout@v3  
+      - name: Set up Python 3.11  
+        uses: actions/setup-python@v4  
+        with: {python-version: 3.11}  
+      - name: Install dependencies  
+        run: pip install -r requirements.txt  
+      - name: Lint  
+        run: |  
+          black --check .  
+          ruff check .  
+      - name: Run tests  
+        run: pytest --cov=./
+```
 
 ## Environment Variables
 
@@ -105,21 +109,27 @@ Secrets such as API keys (OPENAI_API_KEY, GOOGLE_API_KEY, etc.) should be kept o
 
 ### Setup Steps
 
-\# 1. Clone the repository  
-git clone <  
+```bash
+# 1. Clone the repository  
+git clone https://github.com/marchanyanehu/diploma_v1.git  
 cd diploma_v1  
-<br/>\# 2. Copy environment file  
-cp .env.example .env  
-\# Edit .env to configure credentials (database, JWT secret, API keys, etc.)  
-<br/>\# 3. Start services with Docker Compose  
-docker-compose up --build
 
-This will build images and start all services (Postgres, Redis, API, workers). The API will be accessible at **<http://localhost:8000>**.
+# 2. Copy environment file  
+cp .env.example .env  
+# Edit .env to configure credentials (database, JWT secret, API keys, etc.)  
+
+# 3. Start services with Docker Compose  
+docker-compose up --build
+```
+
+This will build images and start all services (Postgres, Redis, API, workers). The API will be accessible at **http://localhost:8000**.
 
 Alternatively, one can run the API directly with Uvicorn (for development):
 
+```bash
 pip install -r requirements.txt  
 uvicorn services.api.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 ## Verify Installation
 

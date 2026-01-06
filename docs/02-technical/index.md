@@ -12,20 +12,22 @@ This section covers the technical architecture, design decisions, and implementa
 
 ### High-Level Architecture
 
+```mermaid
 graph TD  
-User\[User/Client\] -->|REST API| API\[FastAPI Service\]  
-API -->|SQL/ORM| DB\[(PostgreSQL)\]  
-API -->|Celery Queue| Redis\[(Redis Broker)\]  
-<br/>Scheduler\[Scheduler Service (Beat)\] -->|Checks DB| DB  
+User[User/Client] -->|REST API| API[FastAPI Service]  
+API -->|SQL/ORM| DB[(PostgreSQL)]  
+API -->|Celery Queue| Redis[(Redis Broker)]  
+Scheduler[Scheduler Service (Beat)] -->|Checks DB| DB  
 Scheduler -->|Schedules Task| Redis  
-<br/>Redis -->|fetching_queue| Headless\[Headless Worker\]  
-Redis -->|ai_queue| AI\[AI Worker\]  
-<br/>Headless -->|Fetch Page| Web\[Target Website\]  
+Redis -->|fetching_queue| Headless[Headless Worker]  
+Redis -->|ai_queue| AI[AI Worker]  
+Headless -->|Fetch Page| Web[Target Website]  
 Headless -->|Stores Content| DB  
-<br/>Headless -->|→| Redis  
+Headless -->|→| Redis  
 AI -->|Reads Content| DB  
-AI -->|Calls LLM| LLM\[LLM Provider\]  
+AI -->|Calls LLM| LLM[LLM Provider]  
 AI -->|Stores Results| DB
+```
 
 _Figure: High-level component interactions in the system._
 
