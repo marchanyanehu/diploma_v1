@@ -1,28 +1,51 @@
 # Project Scope
 
-## In-Scope
+## In Scope ✅
 
-The following components and features will be developed:
+| Feature | Description | Priority |
+|---------|-------------|----------|
+| **Natural-Language Query Interface** | API endpoint for plain-English data extraction requests ("Extract titles from..."). | Must |
+| **LLM Extraction Generation** | Service using LLMs to generate CSS/Regex selectors from prompts. | Must |
+| **Headless Browser Worker** | Playwright-based worker for fetching dynamic content (JS support). | Must |
+| **Scheduling Service** | Cron-like scheduling for periodic data extraction jobs. | Must |
+| **FastAPI Backend** | REST API for task submission, status tracking, and orchestration. | Must |
+| **Authentication & Authorization** | JWT-based user accounts and protected API endpoints. | Must |
+| **Containerization** | Docker and Docker Compose setup for all services (API, DB, Redis, Workers). | Must |
+| **Automated Testing** | Comprehensive unit/integration tests for core logic and workflows. | Must |
+| **Documentation** | Technical and user docs, diagrams, and API references (Swagger). | Must |
 
-- **Natural-Language Query Interface:** The system exposes an API endpoint (and optionally a minimal UI) where users can submit plain-English requests (e.g. "Extract all news headlines from example.com").
-- **LLM Extraction Logic Generator:** A service that sends the user's query and page content to a Large Language Model (e.g. GPT/Gemini) which outputs extraction instructions (CSS selectors, XPath, or regex).
-- **Headless Browser Worker:** A Playwright-based worker that fetches web pages (executing JavaScript if needed) and applies extraction logic to collect data.
-- **Scheduling Service and History:** Ability for users to create cron-like schedules for periodic data extraction. Each run is logged in PostgreSQL for audit and tracking.
-- **FastAPI Backend:** A Python/FastAPI web service that exposes the REST API for user interactions (task submission, status, result, schedule management) and orchestrates the above components.
-- **Authentication & Authorization:** Implementation of JWT-based user accounts, with token issuance (/auth) and protected endpoints as per requirements.
-- **Containerization:** All services (API, Scheduler, Workers, Redis, Postgres) will be containerized with Docker, orchestrated via Docker Compose for easy deployment.
-- **Automated Testing:** Comprehensive test suite (unit/integration) covering models, services, and workflows to ensure correctness and quality.
-- **Documentation:** Full technical and user documentation, including architecture diagrams, API references, user guide, and retrospective.
+## Out of Scope ❌
 
-## Out-of-Scope
+| Feature | Reason | When Possible |
+|---------|--------|---------------|
+| **Large-Scale Web Crawling** | Focus is on specific, user-defined pages, not recursive broad crawling. | Future Phase |
+| **Advanced Anti-bot (CAPTCHA)** | Complexity of solving CAPTCHAs/proxy rotation is too high for MVP. | Future Phase |
+| **Custom LLM Training** | Using pre-trained APIs (OpenAI/Gemini) is sufficient and strictly defined. | Never (Cost/Time) |
+| **Full Web User Interface** | Focus is on Backend API; minimal/admin UI only if time permits. | TBD |
+| **Rich Report Generation** | PDF/Dashboard exports are secondary to raw data access (JSON/CSV). | Future Phase |
+| **Third-Party Scraping APIs** | Dependency on external paid scraping services is avoided for learning purposes. | Never |
 
-To keep the project focused, the following are explicitly excluded:
+## Assumptions
 
-- **Large-Scale Distributed Crawling:** No massive web crawler or cluster setup for scraping the entire web. Only user-specified sites are targeted, not bulk crawl operations.
-- **Advanced Anti-bot Measures:** Features like proxy rotation, CAPTCHA solving, or advanced bot evasion techniques are not included.
-- **Custom ML Model Training:** We will not develop new LLM models; we integrate existing LLM APIs (e.g., OpenAI, Gemini) for prompt-based extraction.
-- **User Interface (Frontend):** A full-featured web UI is out of scope. The focus is on a backend API (and possibly minimal admin pages) for data extraction.
-- **Export Formats:** Only basic JSON results (and CSV via downstream tools) are provided; rich report generation (PDFs, dashboards) is not covered.
-- **Third-Party Scraping APIs:** The system does not rely on external scraping services; it fetches pages directly via the headless worker.
+| # | Assumption | Impact if Wrong | Probability |
+|---|------------|-----------------|-------------|
+| 1 | **LLM API Availability** | If OpenAI/Gemini are down or change pricing, extraction fails. | Low |
+| 2 | **Target Site Structure** | Sites allow some level of access (not 100% Cloudflare blocked). | Medium |
+| 3 | **Hardware Resources** | Host machine has enough RAM for Playwright (headless browser). | Low |
 
-This scoping ensures the diploma project emphasizes the core LLM-powered extraction and scheduling functionality without unnecessary features.
+## Dependencies
+
+| Dependency | Type | Owner | Status |
+|------------|------|-------|--------|
+| **OpenAI/Gemini API** | External | OpenAI/Google | ✅ |
+| **Playwright Browser** | Technical | Microsoft | ✅ |
+| **PostgreSQL** | Technical | Network | ✅ |
+
+## Constraints
+
+| Constraint Type | Description | Mitigation |
+|-----------------|-------------|------------|
+| **Time** | Diploma submission deadline is strict. | Scope limited to "Must Have" features; "Nice to Have" dropped if needed. |
+| **Budget** | Limited budget for API tokens (OpenAI) and hosting. | Caching generated selectors to minimize repetitive LLM calls. |
+| **Technology** | Must use Python, Docker, and PostgreSQL. | Standard, well-supported stack chosen. |
+| **Personnel** | Single developer (Solo Project). | Leveraging high-level libraries (FastAPI, Playwright) to speed dev. |
