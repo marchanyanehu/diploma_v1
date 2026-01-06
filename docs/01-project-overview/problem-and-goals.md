@@ -25,5 +25,5 @@ Current web scraping solutions require engineers to hand-craft and frequently up
 | --- | --- | --- |
 | Accelerate source onboarding | Reduce time to integrate a new website via LLM-generated extraction patterns | Time to first results < 1 day (vs. weeks manually) |
 | Empower non-technical users | Allow any user to define scraping tasks via natural-language prompts | \>90% of test queries handled without developer support |
-| Minimize maintenance effort | Auto-adapt to minor page changes via LLM (regex regeneration) | 50% fewer manual updates needed for changes |
+| Minimize maintenance effort | Auto-adapt to minor page changes via LLM (selector regeneration) | 50% fewer manual updates needed for changes |
 | Provide scheduling & auditability | Users can schedule recurring extractions; all runs are logged with results | Ability to view logs/history; scheduled jobs run automatically |

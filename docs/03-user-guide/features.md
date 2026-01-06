@@ -45,8 +45,8 @@ curl -X GET "http://localhost:8000/api/v1/result/<task_id>" \
     "url": "https://news.example.com",  
     "prompt": "Find all article headlines and their dates",  
     "data": [  
-        {"text": "Title 1", "source": "generated_regex", "confidence": 0.95},  
-        {"text": "Title 2", "source": "generated_regex", "confidence": 0.93}  
+        {"text": "Title 1", "source": "generated_selector", "confidence": 0.95},  
+        {"text": "Title 2", "source": "generated_selector", "confidence": 0.93}  
     ],  
     "metadata": {"total_matches": 2, "used_cached_parser": false},  
     "processing_time": 4.2  
@@ -113,3 +113,21 @@ _(Not applicable: this is an API-based system; no keyboard shortcuts)_
 | Multi-field Schema Extraction | ✅   |
 | Scheduling Jobs | ✅   |
 | Real-time Data | ✅ (subject to prompt and site behavior) |
+
+## Usage Examples & Scenarios
+
+### Example 1: Extract Job Listings
+**Prompt:** "I want all job titles and their locations"  
+**Scenario:** A recruiter monitoring competitor hiring pages.  
+**Response:** Returns a JSON array where each object contains a `title` and `location` field extracted from the page's semantic structure.
+
+### Example 2: E-commerce Price Tracking
+**Prompt:** "Get all product names and their current prices in EUR"  
+**Scenario:** An analyst tracking market trends.  
+**Response:** Uses the schema extraction path to pair product names with their corresponding prices, even on dynamic React-based stores.
+
+### Example 3: News Aggregation
+**Prompt:** "Extract all headlines from the last 24 hours"  
+**Scenario:** Building a custom news feed.  
+**Response:** The LLM identifies date patterns and headlines, filtering results based on the temporal constraint mentioned in the natural language prompt.
+

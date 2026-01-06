@@ -51,13 +51,13 @@ Main table for tracking each scraping task.
 | extracted_data | JSON | NULLABLE | Final data array (on SUCCESS) |
 | total_matches | INTEGER | NULLABLE | Number of items extracted |
 | processing_time_seconds | INTEGER | NULLABLE | Time taken (seconds) |
-| used_cached_parser | BOOLEAN | NOT NULL DEFAULT FALSE | Whether a cached regex was used |
+| used_cached_parser | BOOLEAN | NOT NULL DEFAULT FALSE | Whether a cached selector was used |
 | created_at, started_at, completed_at | TIMESTAMP |     | Timestamps for creation, start, completion |
 | owner_id | INTEGER | FK -> users.id | Ownering user (nullable if anonymous tasks) |
 | intent_id | INTEGER | FK -> task_intents.id | Intent details (for query reuse) |
 | used_parser_id | INTEGER | FK -> parsers_cache.id | Cached parser used (if any) |
 
-**Relationships:** Each task optionally links to one TaskIntent (normalized prompt data) and one ParserCache entry (if cached regex was used).
+**Relationships:** Each task optionally links to one TaskIntent (normalized prompt data) and one ParserCache entry (if cached selector was used).
 
 ### task_intents
 
@@ -88,7 +88,7 @@ Holds large source data for a task to keep scraping_tasks slim.
 
 ### parsers_cache
 
-Caches successful regex parsers to reuse.
+Caches successful selectors to reuse.
 
 | Column | Type | Constraints | Description |
 | --- | --- | --- | --- |
@@ -98,8 +98,8 @@ Caches successful regex parsers to reuse.
 | user_intent | TEXT | NOT NULL | Normalized prompt text |
 | intent_keywords | JSON | NULLABLE | Keywords for matching |
 | target_data_type | VARCHAR | NULLABLE | e.g. "job_listings" |
-| generated_regex | TEXT | NOT NULL | The regex pattern string |
-| source_type | VARCHAR | NOT NULL | e.g. "HTML", "JSON", "SCHEMA" |
+| generated_selector | TEXT | NOT NULL | The extraction pattern (CSS selector, Regex, or JSON path) |
+| source_type | VARCHAR | NOT NULL | Type of content the selector applies to (e.g. SEMANTIC, HTML, JSON) |
 | source_identifier | TEXT | NULLABLE | e.g. XHR URL or HTML context |
 | test_matches_count | INTEGER | NOT NULL | \# of matches found during test |
 | confidence_score | INTEGER | NOT NULL DEFAULT 100 | Match percentage (0-100) |

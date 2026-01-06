@@ -30,7 +30,7 @@ AIWorker -->|(calls LLM API)| Internet
 - **Redis** (diploma_redis): on port 6379. Acts as Celery broker/back-end and stores rate limit counters.
 - **API Service** (diploma_api): on port 8000. Exposes REST endpoints. Depends on Redis and Postgres (via depends_on healthcheck).
 - **Headless Worker** (diploma_headless_worker): No host port (internal). Runs Celery worker for page fetching (queue=fetching_queue). Uses Playwright; has shm_size: 1gb for Chromium.
-- **AI Worker** (diploma_ai_worker): No host port. Runs Celery worker for LLM regex generation (queue=ai_queue).
+- **AI Worker** (diploma_ai_worker): No host port. Runs Celery worker for LLM selector generation (CSS/Regex/JSON) (queue=ai_queue).
 - **Scheduler** (diploma_scheduler): No host port. Runs Celery Beat to enqueue scheduled jobs into Redis.
 - **Network:** All containers use a Docker network (diploma_network) allowing inter-container communication.
 - **Volumes:**

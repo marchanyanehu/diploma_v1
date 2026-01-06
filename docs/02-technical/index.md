@@ -40,35 +40,54 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | **API Backend** | Handles authentication and task management (create task, check status/result, schedule jobs). Orchestrates workers via Celery. | Python 3.11, FastAPI, Uvicorn |
 | **Celery Workers** | Background services performing: |     |
 | &lt;br&gt;- **Headless Worker**: Fetch web pages using Playwright, extract semantic page text and network data. |     |     |
-| &lt;br&gt;- **AI Worker**: Interpret prompt, generate regex via LLM, apply regex for data extraction. | Python, Celery, Redis, Playwright |     |
+| <br>- **AI Worker**: Interpret prompt, generate selectors (CSS/Regex/JSON) via LLM, apply selectors for data extraction. | Python, Celery, Redis, Playwright |     |
 | **Scheduler** | Cron-like service (Celery Beat) that enqueues tasks per user-defined schedule in the database. | Python, Celery Beat, Redis |
 | **Database** | Central PostgreSQL database for all data: |     |
 | &lt;br&gt;- _Users_: Auth info |     |     |
 | &lt;br&gt;- _ScrapingTasks_: Task metadata and results |     |     |
 | &lt;br&gt;- _ScheduledJobs_: Cron definitions |     |     |
-| &lt;br&gt;- _ParserCache_: Regex patterns for reuse | PostgreSQL 15, SQLAlchemy ORM |     |
+| <br>- _ParserCache_: Selectors for reuse | PostgreSQL 15, SQLAlchemy ORM |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
 | **External LLMs** | Third-party Large Language Models (OpenAI/Gemini/DeepSeek) used to interpret prompts and generate extraction patterns. | e.g. OpenAI API, Gemini API, DeepSeek (Baseten) |
 
 ### Data Flow
 
-- **User Request:** A client sends a JSON request (url + prompt) to POST /api/v1/process.
-- **Task Creation:** API service validates input, creates a ScrapingTask record (status=PENDING) and enqueues a Celery task to fetching_queue.
-- **Headless Fetch:** Headless Worker pulls the task, loads the page in Playwright (using configured headless browser flags), and captures:
-- Semantic content (innerText with markers)
-- Full HTML
-- Network responses (XHR JSON, etc.) It stores this raw content linked to the task.
-- **AI Processing:** A Celery task on ai_queue is started. The worker:
-- Extracts intent (target/keywords/fields) from the prompt using an LLM (intent extraction module).
-- Checks the parsers_cache (by URL and intent) for a matching regex.
-- If cache hit: use regex on stored content, skip LLM calls. Otherwise, proceed.
-- **Schema Path:** If multiple fields requested, LLM extracts all fields simultaneously (schema_extraction).
-- **Single-Field Path:** LLM finds examples of target data, regex is generated to match those examples.
-- Validate and possibly refine regex (iterative LLM prompts) until adequate accuracy.
-- Save successful regex to parsers_cache.
-- Apply regex to full HTML content to produce structured results (with text, confidence, etc.).
-- **Result Delivery:** Final results (JSON records) and metadata (match count, used cache flag, timing) are saved to the ScrapingTask record (status=SUCCESS or FAILED). The user can retrieve via GET /api/v1/result/{task_id}.
-- **Scheduling:** If the request was a scheduled job, the Scheduler (Beat) enqueues new tasks at the specified cron times automatically.
+1.  **User Request:** A client sends a JSON request (url + prompt) to `POST /api/v1/process`.
+2.  **Task Creation:** API service validates input, creates a ScrapingTask record (status=PENDING) and enqueues a Celery task to `fetching_queue`.
+3.  **Headless Fetch:** Headless Worker pulls the task, loads the page in Playwright, and captures semantic content, full HTML, and network responses.
+4.  **Initial LLM Extraction:** 
+    *   The system first invokes the LLM Intelligence Pipeline to extract data based on the user's prompt. 
+    *   **Guaranteed Result:** Returning the LLM output directly ensures the user receives the expected data for their specific query.
+5.  **Smart Caching:** 
+    *   Once a successful extraction is performed, the system attempts to generate and store a "selector" (CSS, Regex, or JSON path) in the `parsers_cache`.
+    *   The cache is indexed by `domain + complete URL + requested fields`.
+6.  **Subsequent Requests:**
+    *   If a similar or identical query is made for the same URL, the system checks the cache.
+    *   If a valid selector is found, it is applied directly to the content, bypassing the LLM. This provides a **10,000x speedup** for repeated queries.
+7.  **Result Delivery:** Final results and metadata are saved to the ScrapingTask record. Users retrieve results via `GET /api/v1/result/{task_id}`.
+
+### Multi-Format Selector Caching
+
+The system supports multiple ways to store and reuse extraction patterns, making it robust across different content types:
+
+*   **Regex (Semantic):** Patterns generated from structural markers in the semantic text (e.g., `## [LINK: text]`).
+*   **CSS Selectors:** Direct targeting of HTML elements for stable layouts.
+*   **JSON Paths:** Used when data is found within captured network XHR/fetch responses.
+
+#### Cache Features:
+*   **Field-Based Indexing:** Same patterns reused even if prompts differ (e.g., "get prices" vs. "extract costs").
+*   **Self-Healing:** Patterns are validated on each use. If match accuracy drops (e.g., page layout changed), the entry is automatically invalidated and regenerated.
+
+### System Constraints & Limitations
+
+Understanding these constraints helps set appropriate expectations for the extraction pipeline:
+
+1.  **Public Access Only:** Cannot log into websites or bypass paywalls/OAuth.
+2.  **No CAPTCHA Solving:** Heavily protected sites (CloudFlare, etc.) may block the headless worker.
+3.  **Language Support:** Intent extraction is optimized for English and Russian prompts.
+4.  **Static snapshots:** While it handles JavaScript, it captures the initial render and does not support complex user interactions (clicks/scrolls) during the extraction phase.
+5.  **Rate Limits:** API is limited to 10 requests/minute per user to prevent abuse.
+
 
 ### Key Technical Decisions
 

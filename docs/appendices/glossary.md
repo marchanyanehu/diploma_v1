@@ -15,7 +15,7 @@
 | **Playwright** | A headless browser automation library used to fetch and render web pages (even with JavaScript). |
 | **Docker Compose** | A tool for defining and running multi-container Docker applications. Used to orchestrate services (API, DB, Redis, etc.). |
 | **Prompt Injection** | A form of attack where malicious input attempts to alter the instructions given to the LLM. The system sanitizes prompts to prevent this. |
-| **Parser Cache** | A store of previously generated regex patterns (parsers) for reuse on repeated tasks, improving performance. |
+| **Parser Cache** | A store of previously generated selectors (parsers) for reuse on repeated tasks, improving performance. |
 
 ## Acronyms
 

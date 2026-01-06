@@ -7,7 +7,7 @@ This section reflects on the project development process, lessons learned, and f
 ### Technical Successes
 
 - **Microservices Architecture:** Decoupling the system into API, workers, and scheduler made it easier to develop and test each component independently.
-- **LLM Integration:** Successfully used GPT/Gemini for prompt interpretation and regex generation, achieving multi-field extraction without hardcoding rules.
+- **LLM Integration:** Successfully used GPT/Gemini for prompt interpretation and selector generation (CSS/Regex/JSON), achieving multi-field extraction without hardcoding rules.
 - **Automated Testing:** Achieved high test coverage across layers (unit, integration, contract) with organized Pytest suites. The comprehensive tests helped ensure system reliability.
 - **Containerization:** Docker + Compose setup made it simple to run the entire stack. This streamlined setup was documented in the README.
 - **Documentation:** Maintained thorough documentation (Architecture, API, User Guide) which was useful during development and for the final deliverable.
@@ -34,7 +34,7 @@ This section reflects on the project development process, lessons learned, and f
 
 ### Challenges Encountered
 
-- **LLM Prompt Engineering:** Crafting effective prompts for schema vs. regex generation required trial and error. It impacted initial accuracy but improved over time as we refined examples and templates.
+- **LLM Prompt Engineering:** Crafting effective prompts for schema vs. selector generation (CSS/Regex/JSON) required trial and error. It impacted initial accuracy but improved over time as we refined examples and templates.
 - **Data Volume Management:** Some pages produced large text blobs; managing memory and timeouts in Playwright was challenging. We mitigated by limiting snippet size and using rate limits.
 - **Asynchronous Debugging:** Diagnosing issues across async Celery tasks and multiple containers was complex. Logging and health-checks helped, but some bugs (e.g. missing env var) took time to trace.
 - **Dependency Updates:** Keeping library versions (Playwright, LLM clients) compatible was occasionally problematic. Pinning versions and using requirements.txt helped maintain stability.

@@ -14,7 +14,7 @@ A: Register via POST /auth/register, then log in with POST /auth/token to get a 
 A: Both static and dynamic sites are supported (via Playwright). However, sites requiring login or behind heavy anti-bot measures may not work without additional configuration.
 
 **Q: How fast are the results?**  
-A: Initial tasks may take a few seconds (due to LLM calls). Subsequent requests on the same URL/fields may be faster via cached regex patterns. There are no hard SLAs for response time; this is an experimental system.
+A: Initial tasks may take a few seconds (due to LLM calls). Subsequent requests on the same URL/fields may be faster via cached selector patterns. There are no hard SLAs for response time; this is an experimental system.
 
 ### Account & Access
 
@@ -30,7 +30,7 @@ A: Users can delete their data by direct database action or the administrator. (
 A: The AI may return incorrect or empty results. For best results, be clear about what fields you want (e.g. include field names, avoid vague requests).
 
 **Q: How do I know the data sources (HTML path) used?**  
-A: Each result includes a source field indicating how it was extracted (e.g. generated_regex or schema_extraction). Source paths (XPaths) are shown in result objects.
+A: Each result includes a source field indicating how it was extracted (e.g. generated_selector or schema_extraction). Source paths (XPaths) are shown in result objects.
 
 ### Error Troubleshooting
 
