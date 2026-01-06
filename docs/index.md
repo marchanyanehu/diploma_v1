@@ -5,9 +5,9 @@
 | Field | Value |
 | --- | --- |
 | **Student** | Yan Marchan |
-| **Group** | (Not applicable) |
-| **Supervisor** | (Not applicable) |
-| **Date** | 2025-01-05 |
+| **Group** | Informatics, 3rd Year |
+| **Supervisor** | Evgeniy Tretyak |
+| **Date** | 2025-01-06 |
 
 **Links**
 

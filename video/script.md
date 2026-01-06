@@ -8,7 +8,7 @@
 ## Script
 
 **0:00 - 0:10: Introduction**
-"Hello, this is [Name]. This is a demo of my diploma project: an AI-Powered Web Scraper API."
+"Hello, this is Yan Marchan. This is a demo of my diploma project: an AI-Powered Web Scraper API."
 
 **0:10 - 0:40: Creating a Scraping Job**
 "Here in the Swagger UI, I'm creating a new scraping job. I simply provide the URL and a natural language description of what I want to extract."

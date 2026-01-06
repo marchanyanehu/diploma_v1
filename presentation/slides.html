@@ -1,299 +1,368 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <style>
-        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #f0f0f0; }
-        .slide { 
-            width: 1280px; height: 720px; 
-            background: white; 
-            margin: 0 auto 20px auto; 
-            padding: 60px; 
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f0f0f0;
+        }
+
+        .slide {
+            width: 1280px;
+            height: 720px;
+            background: white;
+            margin: 0 auto 20px auto;
+            padding: 60px;
             box-sizing: border-box;
             position: relative;
             page-break-after: always;
             display: flex;
             flex-direction: column;
         }
-        h1 { color: #2c3e50; margin-bottom: 0.5em; font-size: 48px; }
-        h2 { color: #34495e; font-size: 36px; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0; }
-        ul { font-size: 28px; line-height: 1.6; color: #2c3e50; }
-        li { margin-bottom: 15px; }
-        .footer { position: absolute; bottom: 20px; right: 20px; font-size: 16px; color: #7f8c8d; }
-        .center { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; }
-        .highlight { color: #e74c3c; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; font-size: 24px; }
-        th { background-color: #f2f2f2; }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 0.5em;
+            font-size: 48px;
+        }
+
+        h2 {
+            color: #34495e;
+            font-size: 36px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+
+        ul {
+            font-size: 28px;
+            line-height: 1.6;
+            color: #2c3e50;
+        }
+
+        li {
+            margin-bottom: 15px;
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 16px;
+            color: #7f8c8d;
+        }
+
+        .center {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            text-align: center;
+        }
+
+        .highlight {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+            font-size: 24px;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
     </style>
 </head>
+
 <body>
 
-<!-- Slide 1: Title -->
-<div class="slide">
-    <div class="center">
-        <h1>Intelligent Web Data Aggregator</h1>
-        <h2>Diploma Project</h2>
-        <p style="font-size: 32px; margin-top: 40px;">Student: [Student Name]</p>
-        <p style="font-size: 28px;">Supervisor: [Supervisor Name]</p>
-        <p style="font-size: 24px; color: #7f8c8d;">Jan 2026</p>
-    </div>
-</div>
-
-<!-- Slide 2: Context -->
-<div class="slide">
-    <h2>Context</h2>
-    <ul>
-        <li>Data is the fuel of modern business (Price monitoring, Market research, News aggregation).</li>
-        <li>Manual copy-pasting is inefficient.</li>
-        <li>Existing solutions are either:
-            <ul>
-                <li>Expensive SaaS tools.</li>
-                <li>Brittle scripts that break on layout changes.</li>
-            </ul>
-        </li>
-    </ul>
-</div>
-
-<!-- Slide 3: Problem - The Breaking Point -->
-<div class="slide">
-    <h2>The Problem</h2>
-    <ul>
-        <li><strong>Structural Rigidity:</strong> Traditional scrapers rely on hardcoded CSS selectors (e.g., `div.product > span.price`).</li>
-        <li><strong>Maintenance Nightmare:</strong> A slight UI update on the target site breaks the scraper.</li>
-        <li><strong>Developer Botleneck:</strong> Every new site requires a developer to write new parsing logic.</li>
-    </ul>
-</div>
-
-<!-- Slide 4: Goals -->
-<div class="slide">
-    <h2>Project Goals</h2>
-    <ul>
-        <li><strong>Resilience:</strong> Build a system that adapts to HTML structure changes.</li>
-        <li><strong>Usability:</strong> Allow users to request data in natural language (e.g., "Get me the prices").</li>
-        <li><strong>Automation:</strong> Support recurring scheduled jobs.</li>
-        <li><strong>Performance:</strong> Cache successful patterns to reduce AI costs.</li>
-    </ul>
-</div>
-
-<!-- Slide 5: Solution Architecture -->
-<div class="slide">
-    <h2>Solution Overview</h2>
-    <div style="text-align: center; margin-top: 40px;">
-        <div style="border: 3px solid #34495e; padding: 20px; display: inline-block;">
-            <strong>Client</strong><br>(HTTP/Curl)
-        </div>
-        <div style="font-size: 40px; display: inline-block; vertical-align: middle;">&#8594;</div>
-        <div style="border: 3px solid #3498db; padding: 20px; display: inline-block; background: #ebf5fb;">
-            <strong>FastAPI</strong><br>(Orchestration)
-        </div>
-        <div style="font-size: 40px; display: inline-block; vertical-align: middle;">&#8594;</div>
-        <div style="border: 3px solid #e74c3c; padding: 20px; display: inline-block; background: #fadbd8;">
-            <strong>Celery Workers</strong><br>(AI & Browser)
+    <!-- Slide 1: Title -->
+    <div class="slide">
+        <div class="center">
+            <h1>Intelligent Web Data Aggregator</h1>
+            <h2>Diploma Project</h2>
+            <p style="font-size: 32px; margin-top: 40px;">Student: Yan Marchan</p>
+            <p style="font-size: 28px;">Supervisor: Evgeniy Tretyak</p>
+            <p style="font-size: 24px; color: #7f8c8d;">Jan 2026</p>
         </div>
     </div>
-    <ul>
-        <li><strong>Microservices:</strong> API, AI Worker, Headless Browser, Redis, Postgres.</li>
-        <li><strong>Tech Stack:</strong> Python, Docker, Playwright, OpenAI/Gemini.</li>
-    </ul>
-</div>
 
-<!-- Slide 6: Criterion 1 - Backend -->
-<div class="slide">
-    <h2>Criterion 1: Backend API</h2>
-    <ul>
-        <li><strong>Why FastAPI?</strong> High performance, async support, auto-generated Swagger UI.</li>
-        <li><strong>Implementation:</strong>
-            <ul>
-                <li>RESTful endpoints (`/process`, `/jobs`).</li>
-                <li>Pydantic models for strict data validation.</li>
-                <li>Dependency Injection for database sessions.</li>
-            </ul>
-        </li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 7: Criterion 2 - Web Scraping -->
-<div class="slide">
-    <h2>Criterion 2: Scraping Engine</h2>
-    <ul>
-        <li><strong>Tool:</strong> Playwright (Headless Browser).</li>
-        <li><strong>Why?</strong> Support for extensive JavaScript (React/Angular/Vue sites).</li>
-        <li><strong>Features:</strong>
-            <ul>
-                <li>Network interception (block images/fonts).</li>
-                <li>DOM Snapshotting (innerText & HTML).</li>
-            </ul>
-        </li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 8: Criterion 3 - AI Intelligence -->
-<div class="slide">
-    <h2>Criterion 3: AI Extraction</h2>
-    <ul>
-        <li><strong>Logic:</strong> LLM analyzes text + HTML snippet to generate selectors.</li>
-        <li><strong>Strategy:</strong>
-            <ul>
-                <li><strong>Heuristic:</strong> "Find specific field using CSS".</li>
-                <li><strong>Validation:</strong> Test selector on page content immediately.</li>
-            </ul>
-        </li>
-        <li>Reduces reliance on hardcoded regex.</li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 9: Criterion 4 - Data Storage -->
-<div class="slide">
-    <h2>Criterion 4: Persistence</h2>
-    <ul>
-        <li><strong>Database:</strong> PostgreSQL 15.</li>
-        <li><strong>Schema Design:</strong>
-            <ul>
-                <li>`User` and `ScrapingTask` tables.</li>
-                <li>`ParserCache` to store successful selectors.</li>
-            </ul>
-        </li>
-        <li><strong>ORM:</strong> SQLAlchemy (Async).</li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 10: Criterion 5 - Scheduling -->
-<div class="slide">
-    <h2>Criterion 5: Scheduling</h2>
-    <ul>
-        <li><strong>Requirement:</strong> Recurring data collection.</li>
-        <li><strong>Tool:</strong> Celery Beat.</li>
-        <li><strong>Implementation:</strong> 
-            <ul>
-                <li>Users define Cron expressions (`0 9 * * *`).</li>
-                <li>System spawns new tasks automatically.</li>
-            </ul>
-        </li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 11: Criterion 6 - Infrastructure -->
-<div class="slide">
-    <h2>Criterion 6: Infrastructure</h2>
-    <ul>
-        <li><strong>Containerization:</strong> Docker & Docker Compose.</li>
-        <li><strong>Services:</strong> 
-            <ul>
-                <li>`api`, `worker`, `db`, `redis`.</li>
-            </ul>
-        </li>
-        <li><strong>Benefit:</strong> "Works on my machine" consistency.</li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 12: Criterion 7 - QA -->
-<div class="slide">
-    <h2>Criterion 7: Quality Assurance</h2>
-    <ul>
-        <li><strong>Testing Strategy:</strong> Pytest.</li>
-        <li><strong>Levels:</strong>
-            <ul>
-                <li>Unit Tests (Logic, Models).</li>
-                <li>Integration Tests (DB, API flow).</li>
-            </ul>
-        </li>
-        <li><strong>Coverage:</strong> >70% code coverage.</li>
-        <li class="highlight">Status: Implemented ✅</li>
-    </ul>
-</div>
-
-<!-- Slide 13: Demo Scenario 1 -->
-<div class="slide">
-    <h2>Demo: Single Extraction</h2>
-    <ul>
-        <li><strong>Goal:</strong> Extract current news headlines.</li>
-        <li><strong>Input:</strong> URL + "Extract headlines".</li>
-        <li><strong>Process:</strong> 
-            <ol>
-                <li>API receives request.</li>
-                <li>Browser loads page.</li>
-                <li>AI generates `h2.headline` selector.</li>
-                <li>System returns JSON list.</li>
-            </ol>
-        </li>
-    </ul>
-    <p><em>(See screenshots in report)</em></p>
-</div>
-
-<!-- Slide 14: Demo 2 & Scheduling -->
-<div class="slide">
-    <h2>Demo: Scheduling</h2>
-    <ul>
-        <li><strong>Goal:</strong> Monitor price daily.</li>
-        <li><strong>Action:</strong> POST /jobs with cron `0 12 * * *`.</li>
-        <li><strong>Result:</strong> System runs automatically at noon.</li>
-        <li><strong>Benefit:</strong> Passive data accumulation.</li>
-    </ul>
-</div>
-
-<!-- Slide 15: Results -->
-<div class="slide">
-    <h2>Results</h2>
-    <table>
-        <tr>
-            <th>Metric</th>
-            <th>Regex Scraper</th>
-            <th>AI Scraper (Our Solution)</th>
-        </tr>
-        <tr>
-            <td>Resilience</td>
-            <td>Low (Breaks often)</td>
-            <td>High (Adapts)</td>
-        </tr>
-        <tr>
-            <td>Setup Time</td>
-            <td>High (Manual coding)</td>
-            <td>Low (Natural Language)</td>
-        </tr>
-        <tr>
-            <td>Cost</td>
-            <td>Low (CPU only)</td>
-            <td>Medium (LLM tokens) * mitigated by cache</td>
-        </tr>
-    </table>
-</div>
-
-<!-- Slide 16: Challenges & Solutions -->
-<div class="slide">
-    <h2>Challenges</h2>
-    <ul>
-        <li><strong>Challenge:</strong> LLM Hallucinations (generating fake selectors).
-            <br><em>Solution:</em> Validation loop. If selector returns 0 matches, retry or fallback.</li>
-        <li><strong>Challenge:</strong> Slow Browser Rendering.
-            <br><em>Solution:</em> Async Playwright and resource blocking (images/css).</li>
-    </ul>
-</div>
-
-<!-- Slide 17: Retrospective -->
-<div class="slide">
-    <h2>Retrospective</h2>
-    <ul>
-        <li><strong>What went well:</strong> Microservices architecture scaled well; Celery handling background tasks was robust.</li>
-        <li><strong>Improvements:</strong> Could add a visual dashboard (Frontend) instead of just Swagger UI.</li>
-        <li><strong>Lesson:</strong> Validating AI output is as critical as generating it.</li>
-    </ul>
-</div>
-
-<!-- Slide 18: Conclusion -->
-<div class="slide">
-    <div class="center">
-        <h1>Thank You</h1>
-        <h2>Q & A</h2>
-        <p>Project Repository: [Link]</p>
-        <p>Documentation: [Link]</p>
+    <!-- Slide 2: Context -->
+    <div class="slide">
+        <h2>Context</h2>
+        <ul>
+            <li>Data is the fuel of modern business (Price monitoring, Market research, News aggregation).</li>
+            <li>Manual copy-pasting is inefficient.</li>
+            <li>Existing solutions are either:
+                <ul>
+                    <li>Expensive SaaS tools.</li>
+                    <li>Brittle scripts that break on layout changes.</li>
+                </ul>
+            </li>
+        </ul>
     </div>
-</div>
+
+    <!-- Slide 3: Problem - The Breaking Point -->
+    <div class="slide">
+        <h2>The Problem</h2>
+        <ul>
+            <li><strong>Structural Rigidity:</strong> Traditional scrapers rely on hardcoded CSS selectors (e.g.,
+                `div.product > span.price`).</li>
+            <li><strong>Maintenance Nightmare:</strong> A slight UI update on the target site breaks the scraper.</li>
+            <li><strong>Developer Botleneck:</strong> Every new site requires a developer to write new parsing logic.
+            </li>
+        </ul>
+    </div>
+
+    <!-- Slide 4: Goals -->
+    <div class="slide">
+        <h2>Project Goals</h2>
+        <ul>
+            <li><strong>Resilience:</strong> Build a system that adapts to HTML structure changes.</li>
+            <li><strong>Usability:</strong> Allow users to request data in natural language (e.g., "Get me the prices").
+            </li>
+            <li><strong>Automation:</strong> Support recurring scheduled jobs.</li>
+            <li><strong>Performance:</strong> Cache successful patterns to reduce AI costs.</li>
+        </ul>
+    </div>
+
+    <!-- Slide 5: Solution Architecture -->
+    <div class="slide">
+        <h2>Solution Overview</h2>
+        <div style="text-align: center; margin-top: 40px;">
+            <div style="border: 3px solid #34495e; padding: 20px; display: inline-block;">
+                <strong>Client</strong><br>(HTTP/Curl)
+            </div>
+            <div style="font-size: 40px; display: inline-block; vertical-align: middle;">&#8594;</div>
+            <div style="border: 3px solid #3498db; padding: 20px; display: inline-block; background: #ebf5fb;">
+                <strong>FastAPI</strong><br>(Orchestration)
+            </div>
+            <div style="font-size: 40px; display: inline-block; vertical-align: middle;">&#8594;</div>
+            <div style="border: 3px solid #e74c3c; padding: 20px; display: inline-block; background: #fadbd8;">
+                <strong>Celery Workers</strong><br>(AI & Browser)
+            </div>
+        </div>
+        <ul>
+            <li><strong>Microservices:</strong> API, AI Worker, Headless Browser, Redis, Postgres.</li>
+            <li><strong>Tech Stack:</strong> Python, Docker, Playwright, OpenAI/Gemini.</li>
+        </ul>
+    </div>
+
+    <!-- Slide 6: Criterion 1 - Backend -->
+    <div class="slide">
+        <h2>Criterion 1: Backend API</h2>
+        <ul>
+            <li><strong>Why FastAPI?</strong> High performance, async support, auto-generated Swagger UI.</li>
+            <li><strong>Implementation:</strong>
+                <ul>
+                    <li>RESTful endpoints (`/process`, `/jobs`).</li>
+                    <li>Pydantic models for strict data validation.</li>
+                    <li>Dependency Injection for database sessions.</li>
+                </ul>
+            </li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 7: Criterion 2 - Web Scraping -->
+    <div class="slide">
+        <h2>Criterion 2: Scraping Engine</h2>
+        <ul>
+            <li><strong>Tool:</strong> Playwright (Headless Browser).</li>
+            <li><strong>Why?</strong> Support for extensive JavaScript (React/Angular/Vue sites).</li>
+            <li><strong>Features:</strong>
+                <ul>
+                    <li>Network interception (block images/fonts).</li>
+                    <li>DOM Snapshotting (innerText & HTML).</li>
+                </ul>
+            </li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 8: Criterion 3 - AI Intelligence -->
+    <div class="slide">
+        <h2>Criterion 3: AI Extraction</h2>
+        <ul>
+            <li><strong>Logic:</strong> LLM analyzes text + HTML snippet to generate selectors.</li>
+            <li><strong>Strategy:</strong>
+                <ul>
+                    <li><strong>Heuristic:</strong> "Find specific field using CSS".</li>
+                    <li><strong>Validation:</strong> Test selector on page content immediately.</li>
+                </ul>
+            </li>
+            <li>Reduces reliance on hardcoded regex.</li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 9: Criterion 4 - Data Storage -->
+    <div class="slide">
+        <h2>Criterion 4: Persistence</h2>
+        <ul>
+            <li><strong>Database:</strong> PostgreSQL 15.</li>
+            <li><strong>Schema Design:</strong>
+                <ul>
+                    <li>`User` and `ScrapingTask` tables.</li>
+                    <li>`ParserCache` to store successful selectors.</li>
+                </ul>
+            </li>
+            <li><strong>ORM:</strong> SQLAlchemy (Async).</li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 10: Criterion 5 - Scheduling -->
+    <div class="slide">
+        <h2>Criterion 5: Scheduling</h2>
+        <ul>
+            <li><strong>Requirement:</strong> Recurring data collection.</li>
+            <li><strong>Tool:</strong> Celery Beat.</li>
+            <li><strong>Implementation:</strong>
+                <ul>
+                    <li>Users define Cron expressions (`0 9 * * *`).</li>
+                    <li>System spawns new tasks automatically.</li>
+                </ul>
+            </li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 11: Criterion 6 - Infrastructure -->
+    <div class="slide">
+        <h2>Criterion 6: Infrastructure</h2>
+        <ul>
+            <li><strong>Containerization:</strong> Docker & Docker Compose.</li>
+            <li><strong>Services:</strong>
+                <ul>
+                    <li>`api`, `worker`, `db`, `redis`.</li>
+                </ul>
+            </li>
+            <li><strong>Benefit:</strong> "Works on my machine" consistency.</li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 12: Criterion 7 - QA -->
+    <div class="slide">
+        <h2>Criterion 7: Quality Assurance</h2>
+        <ul>
+            <li><strong>Testing Strategy:</strong> Pytest.</li>
+            <li><strong>Levels:</strong>
+                <ul>
+                    <li>Unit Tests (Logic, Models).</li>
+                    <li>Integration Tests (DB, API flow).</li>
+                </ul>
+            </li>
+            <li><strong>Coverage:</strong> >70% code coverage.</li>
+            <li class="highlight">Status: Implemented ✅</li>
+        </ul>
+    </div>
+
+    <!-- Slide 13: Demo Scenario 1 -->
+    <div class="slide">
+        <h2>Demo: Single Extraction</h2>
+        <ul>
+            <li><strong>Goal:</strong> Extract current news headlines.</li>
+            <li><strong>Input:</strong> URL + "Extract headlines".</li>
+            <li><strong>Process:</strong>
+                <ol>
+                    <li>API receives request.</li>
+                    <li>Browser loads page.</li>
+                    <li>AI generates `h2.headline` selector.</li>
+                    <li>System returns JSON list.</li>
+                </ol>
+            </li>
+        </ul>
+        <p><em>(See screenshots in report)</em></p>
+    </div>
+
+    <!-- Slide 14: Demo 2 & Scheduling -->
+    <div class="slide">
+        <h2>Demo: Scheduling</h2>
+        <ul>
+            <li><strong>Goal:</strong> Monitor price daily.</li>
+            <li><strong>Action:</strong> POST /jobs with cron `0 12 * * *`.</li>
+            <li><strong>Result:</strong> System runs automatically at noon.</li>
+            <li><strong>Benefit:</strong> Passive data accumulation.</li>
+        </ul>
+    </div>
+
+    <!-- Slide 15: Results -->
+    <div class="slide">
+        <h2>Results</h2>
+        <table>
+            <tr>
+                <th>Metric</th>
+                <th>Regex Scraper</th>
+                <th>AI Scraper (Our Solution)</th>
+            </tr>
+            <tr>
+                <td>Resilience</td>
+                <td>Low (Breaks often)</td>
+                <td>High (Adapts)</td>
+            </tr>
+            <tr>
+                <td>Setup Time</td>
+                <td>High (Manual coding)</td>
+                <td>Low (Natural Language)</td>
+            </tr>
+            <tr>
+                <td>Cost</td>
+                <td>Low (CPU only)</td>
+                <td>Medium (LLM tokens) * mitigated by cache</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Slide 16: Challenges & Solutions -->
+    <div class="slide">
+        <h2>Challenges</h2>
+        <ul>
+            <li><strong>Challenge:</strong> LLM Hallucinations (generating fake selectors).
+                <br><em>Solution:</em> Validation loop. If selector returns 0 matches, retry or fallback.
+            </li>
+            <li><strong>Challenge:</strong> Slow Browser Rendering.
+                <br><em>Solution:</em> Async Playwright and resource blocking (images/css).
+            </li>
+        </ul>
+    </div>
+
+    <!-- Slide 17: Retrospective -->
+    <div class="slide">
+        <h2>Retrospective</h2>
+        <ul>
+            <li><strong>What went well:</strong> Microservices architecture scaled well; Celery handling background
+                tasks was robust.</li>
+            <li><strong>Improvements:</strong> Could add a visual dashboard (Frontend) instead of just Swagger UI.</li>
+            <li><strong>Lesson:</strong> Validating AI output is as critical as generating it.</li>
+        </ul>
+    </div>
+
+    <!-- Slide 18: Conclusion -->
+    <div class="slide">
+        <div class="center">
+            <h1>Thank You</h1>
+            <h2>Q & A</h2>
+            <p>Project Repository: <a href="https://github.com/marchanyanehu/diploma_v1">GitHub</a></p>
+            <p>Documentation: <a href="https://github.com/marchanyanehu/diploma_v1/tree/main/docs">Docs</a></p>
+        </div>
+    </div>
 
 </body>
+
 </html>
