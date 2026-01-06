@@ -10,11 +10,11 @@
 
 ```mermaid
 erDiagram  
-    USERS ||--o{ SCRAPING_TASKS : owns  
-    USERS ||--o{ SCHEDULED_JOBS : owns  
-    SCRAPING_TASKS }o--|| TASK_SOURCE_DATA : has  
-    SCRAPING_TASKS }o--|| TASK_INTENTS : has  
-    SCRAPING_TASKS }o--|| PARSERS_CACHE : uses
+    USERS ||--o{ SCRAPING_TASKS : "owns"  
+    USERS ||--o{ SCHEDULED_JOBS : "owns"  
+    SCRAPING_TASKS }o--|| TASK_SOURCE_DATA : "has"  
+    SCRAPING_TASKS }o--|| TASK_INTENTS : "has"  
+    SCRAPING_TASKS }o--|| PARSERS_CACHE : "uses"
 ```
 
 _Figure: Simplified ER diagram showing core relationships (User-Tasks-Jobs, and task dependencies)._

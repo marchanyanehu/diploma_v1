@@ -39,4 +39,25 @@
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
 | US-501 | **As a user**, I want repeated scraping of the same site/prompt to be faster by reusing previously learned patterns, so that I get quicker responses on repeat queries. | \- Before invoking LLM pipeline, system checks parsers_cache for matching URL and intent.&lt;br&gt;- If found, uses cached selector and skips LLM calls (response time significantly faster). | Should | ✅   |
-| US-502 | **As a user**, I want to schedule recurring scraping jobs (cron), so that I can automatically collect updated data over time. | \- Provides POST /api/v1/jobs to create a schedule with fields (URL, prompt, cron).&lt;br&gt;- Celery Beat enqueues tasks per schedule and new runs appear in user's job list. | Could | ✅   |
+| US-502 | **As a user**, I want to schedule recurring scraping jobs (cron), so that I can automatically collect updated data over time. | \- Provides POST /api/v1/jobs to create a schedule with fields (URL, prompt, cron).<br>- Celery Beat enqueues tasks per schedule and new runs appear in user's job list. | Could | ✅   |
+
+## Use Case Diagram
+
+```mermaid
+graph LR
+    Analyst((Data Analyst))
+    Admin((Admin))
+    
+    UC1(Submit Query)
+    UC2(View Results)
+    UC3(Schedule Job)
+    UC4(Manage Users)
+    UC5(View Logs)
+
+    Analyst --> UC1
+    Analyst --> UC2
+    Analyst --> UC3
+    Admin --> UC4
+    Admin --> UC5
+    Admin --> UC2
+```

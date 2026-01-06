@@ -22,7 +22,7 @@ Scheduler -->|CELERY| Redis
 Redis -->|fetching_queue| Headless  
 Redis -->|ai_queue| AIWorker  
 Headless -->|Fetch Web| Internet["Target Websites"]  
-AIWorker -->|(calls LLM API)| Internet
+AIWorker -->|"(calls LLM API)"| Internet
 ```
 
 - **Containers:**
