@@ -28,13 +28,13 @@ The _Intelligent Web Data Aggregator_ is a microservices-based backend system th
 
 | #   | Criterion | Status | Documentation |
 | --- | --- | --- | --- |
-| 1   | Requirements & Use Cases | ✅   | criteria/requirements.md |
-| 2   | Architecture & Design | ✅   | criteria/architecture.md |
-| 3   | Implementation & Code Quality | ✅   | criteria/code-quality.md |
-| 4   | Testing & Quality Assurance | ✅   | criteria/testing.md |
-| 5   | Security & Error Handling | ✅   | criteria/security.md |
-| 6   | Performance & Scalability | ✅   | criteria/performance.md |
-| 7   | Documentation & Deployment | ✅   | criteria/documentation.md |
+| 1   | Back-end (FastAPI Service) | ✅   | criteria/01-backend.md |
+| 2   | AI Assistant / Chatbot (LLM Integration) | ✅   | criteria/02-ai-assistant.md |
+| 3   | Database (PostgreSQL) | ✅   | criteria/03-database.md |
+| 4   | Microservices Architecture | ✅   | criteria/04-microservices.md |
+| 5   | Automated Tests (≥ 70% coverage) | ✅   | criteria/05-testing.md |
+| 6   | Containerization (Docker) | ✅   | criteria/06-containerization.md |
+| 7   | API Documentation (Swagger/OpenAPI) | ✅   | criteria/07-api-docs.md |
 
 **Documentation Navigation**
 
