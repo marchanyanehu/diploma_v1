@@ -132,6 +132,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
       - ./services/ai_worker:/app/services/ai_worker:ro
+      - ./services/scheduler:/app/services/scheduler:ro
       - ./shared:/app/shared:ro
     depends_on:
       postgres:

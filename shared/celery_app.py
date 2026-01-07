@@ -69,9 +69,9 @@ def _make_celery() -> Celery:
             "scheduler.check_due_jobs": {"queue": "ai_queue"},
         },
         beat_schedule={
-            "check-every-minute": {
+            "check-due-jobs": {
                 "task": "scheduler.check_due_jobs",
-                "schedule": 60.0,
+                "schedule": 10.0,
             },
         },
     )

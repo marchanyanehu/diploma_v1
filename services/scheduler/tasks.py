@@ -37,7 +37,9 @@ def check_due_jobs():
             
             # Calculate next run time
             try:
-                iter = croniter(job.schedule_cron, now)
+                # Support 6-field cron for seconds if provided
+                is_six_field = len(job.schedule_cron.split()) == 6
+                iter = croniter(job.schedule_cron, now, second_at_beginning=is_six_field)
                 next_run = iter.get_next(datetime)
                 
                 # Update job state
