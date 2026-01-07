@@ -2,9 +2,18 @@
 import re
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
+
+def calculate_similarity(a: str, b: str) -> float:
+    """Calculate string similarity ratio between 0 and 1."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a.strip(), b.strip()).ratio()
 
 def strip_html_to_text(html: str) -> str:
     """Strip HTML tags and normalize whitespace to get clean text."""

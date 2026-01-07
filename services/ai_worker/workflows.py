@@ -17,6 +17,7 @@ from .utils import (
     apply_regex_matches,
     strip_html_to_text,
     convert_html_to_markdown_like,
+    calculate_similarity,
 )
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,105 @@ def run_schema_extraction(
         return []
 
 
+def _check_values_similarity(expected: List[str], actual: List[str], threshold: float) -> tuple[bool, float]:
+    """Check if expected values are present in actual values with sufficient similarity."""
+    if not actual:
+        return False, 0.0
+    
+    total_sim = 0.0
+    count = 0
+    for exp in expected:
+        if not exp: continue
+        best_match_sim = 0.0
+        for act in actual:
+            if not act: continue
+            sim = calculate_similarity(exp, act)
+            if sim > best_match_sim:
+                best_match_sim = sim
+            if best_match_sim > 0.99:
+                break
+        total_sim += best_match_sim
+        count += 1
+    
+    avg_sim = total_sim / count if count > 0 else 1.0
+    return avg_sim >= threshold, avg_sim
+
+
+def _validate_parser_similarity(
+    parser_result: Dict[str, Any],
+    source_content: str,
+    extracted_items: List[Dict],
+    fields: List[str],
+    threshold: float = 0.9
+) -> tuple[bool, float]:
+    """Validate that the parser extracts content similar to the LLM-extracted items."""
+    # 1. Prepare expected values for each field
+    expected_field_values = {f: [] for f in fields}
+    for item in extracted_items:
+        item_fields = item.get("fields", {})
+        for f in fields:
+            val = item_fields.get(f)
+            if val:
+                expected_field_values[f].append(str(val))
+
+    # 2. Execute parser and compare
+    total_avg_sim = 0.0
+    fields_checked = 0
+
+    if parser_result.get("type") == "map":
+        parsers = parser_result.get("parsers", {})
+        source_type = parser_result.get("source_type")
+        flags = parser_result.get("flags", "")
+        
+        for field, pattern in parsers.items():
+            if field not in expected_field_values or not expected_field_values[field]:
+                continue
+            
+            matches = parser_factory.execute_parser(source_type, pattern, source_content, flags)
+            actual_values = [m.get("text", "") for m in matches]
+            
+            valid, sim = _check_values_similarity(expected_field_values[field], actual_values, threshold)
+            total_avg_sim += sim
+            fields_checked += 1
+            if not valid:
+                logger.info(f"Field '{field}' similarity {sim:.4f} below threshold {threshold}")
+                return False, total_avg_sim / fields_checked
+    else:
+        # Single pattern
+        pattern = parser_result.get("pattern", "")
+        source_type = parser_result.get("source_type", "")
+        flags = parser_result.get("flags", "")
+        
+        matches = parser_factory.execute_parser(source_type, pattern, source_content, flags)
+        
+        for field in fields:
+            if not expected_field_values[field]:
+                continue
+            
+            # Extract this field from matches
+            actual_values = []
+            for m in matches:
+                m_fields = m.get("fields", {})
+                if field in m_fields:
+                    actual_values.append(str(m_fields[field]))
+                elif len(fields) == 1:
+                    # For single-field extraction, the parser might return results in 'text'
+                    if "text" in m:
+                        actual_values.append(str(m["text"]))
+                    elif "value" in m_fields:
+                        actual_values.append(str(m_fields["value"]))
+            
+            valid, sim = _check_values_similarity(expected_field_values[field], actual_values, threshold)
+            total_avg_sim += sim
+            fields_checked += 1
+            if not valid:
+                logger.info(f"Field '{field}' similarity {sim:.4f} below threshold {threshold}")
+                return False, total_avg_sim / fields_checked
+
+    final_sim = total_avg_sim / fields_checked if fields_checked > 0 else 1.0
+    return True, final_sim
+
+
 def _cache_parser_from_extraction(
     db, task_id: str, domain: str, fields: List[str],
     source_content: str, extracted_items: List[Dict], llm: LLMClient,
@@ -270,85 +370,104 @@ def _cache_parser_from_extraction(
         log_event(task_id, "parser_cache_skip", reason="insufficient_examples")
         return
     
-    try:
-        target_desc = f"Extract fields: {', '.join(fields)}"
-        
-        # Use Factory to generate best parser
-        result = parser_factory.generate_parser(
-            content=source_content,
-            examples=examples,
-            target_desc=target_desc,
-            llm=llm
-        )
-        
-        if result.get("success"):
+    target_desc = f"Extract fields: {', '.join(fields)}"
+    best_result = None
+    max_attempts = 2
+    similarity_threshold = 0.9
+
+    for attempt in range(max_attempts):
+        try:
+            # Use Factory to generate best parser
+            result = parser_factory.generate_parser(
+                content=source_content,
+                examples=examples,
+                target_desc=target_desc,
+                llm=llm
+            )
             
-            # Handle Map return (Per-Field Parsers)
-            if result.get("type") == "map" and result.get("parsers"):
-                parsers_map = result["parsers"]
-                source_type = result["source_type"]
-                flags = result.get("flags", "")
-                
-                # Cache EACH field independently
-                for field, pattern in parsers_map.items():
-                    if source_type == "REGEX":
-                        stored_regex = f"(?{flags}){pattern}" if flags else pattern
-                    else:
-                        stored_regex = pattern # CSS selector
-                        
-                    db_utils.create_parser_cache_by_fields(
-                        db=db,
-                        domain=domain,
-                        fields=[field], # Single field
-                        generated_regex=stored_regex,
-                        source_type=source_type,
-                        created_by_task_id=task_id,
-                        test_matches_count=len(extracted_items),
-                        confidence_score=int(0.9 * 100),
-                        url_pattern=url_pattern,
-                        sample_input=source_content[:2000],
-                        sample_output=extracted_items[:10]
-                    )
-                
-                log_event(task_id, "parser_cached_map", domain=domain, fields=list(parsers_map.keys()))
-                
-            else:
-                # Legacy / Single Pattern
-                pattern = result["pattern"]
-                source_type = result["source_type"] # CSS, JSONPATH, REGEX
-                flags = result.get("flags", "")
-                
-                # Store regex flags inline for DB compatibility
-                if source_type == "REGEX":
-                    stored_regex = f"(?{flags}){pattern}" if flags else pattern
-                else:
-                    stored_regex = pattern
-                
-                # Confidence estimation
-                confidence = 0.9
-                
-                db_utils.create_parser_cache_by_fields(
-                    db=db,
-                    domain=domain,
-                    fields=fields,
-                    generated_regex=stored_regex,
-                    source_type=source_type,
-                    created_by_task_id=task_id,
-                    test_matches_count=len(extracted_items),
-                    confidence_score=int(confidence * 100),
-                    url_pattern=url_pattern,
-                    sample_input=source_content[:2000],
-                    sample_output=extracted_items[:10]
+            if result.get("success"):
+                # Validate similarity against LLM results
+                is_valid, avg_sim = _validate_parser_similarity(
+                    result, source_content, extracted_items, fields, threshold=similarity_threshold
                 )
-                log_event(task_id, "parser_cached", domain=domain, type=source_type, matches=len(extracted_items))
+                
+                if is_valid:
+                    logger.info(f"Parser validation passed (sim={avg_sim:.4f}) on attempt {attempt+1}")
+                    best_result = result
+                    break
+                else:
+                    logger.warning(f"Parser validation failed (sim={avg_sim:.4f}) on attempt {attempt+1}")
+            else:
+                logger.warning(f"Parser generation failed on attempt {attempt+1}: {result.get('error')}")
+                
+        except Exception as e:
+            logger.error(f"Error during parser caching attempt {attempt+1}: {e}")
+            continue
+
+    if not best_result:
+        log_event(task_id, "parser_cache_failure", reason="low_similarity_or_generation_error")
+        return
+
+    result = best_result
+    
+    # Handle Map return (Per-Field Parsers)
+    if result.get("type") == "map" and result.get("parsers"):
+        parsers_map = result["parsers"]
+        source_type = result["source_type"]
+        flags = result.get("flags", "")
+        
+        # Cache EACH field independently
+        for field, pattern in parsers_map.items():
+            if source_type == "REGEX":
+                stored_regex = f"(?{flags}){pattern}" if flags else pattern
+            else:
+                stored_regex = pattern # CSS selector
+                
+            db_utils.create_parser_cache_by_fields(
+                db=db,
+                domain=domain,
+                fields=[field], # Single field
+                generated_regex=stored_regex,
+                source_type=source_type,
+                created_by_task_id=task_id,
+                test_matches_count=len(extracted_items),
+                confidence_score=int(0.9 * 100),
+                url_pattern=url_pattern,
+                sample_input=source_content[:2000],
+                sample_output=extracted_items[:10]
+            )
+        
+        log_event(task_id, "parser_cached_map", domain=domain, fields=list(parsers_map.keys()))
+        
+    else:
+        # Legacy / Single Pattern
+        pattern = result["pattern"]
+        source_type = result["source_type"] # CSS, JSONPATH, REGEX
+        flags = result.get("flags", "")
+        
+        # Store regex flags inline for DB compatibility
+        if source_type == "REGEX":
+            stored_regex = f"(?{flags}){pattern}" if flags else pattern
         else:
-             # handle error
-            logger.warning(f"Parser generation failed: {result.get('error')}")
-            log_event(task_id, "parser_generation_failed", error=result.get("error"))
-            
-    except Exception as e:
-        logger.warning(f"Parser caching exception: {e}")
-        log_event(task_id, "parser_cache_error", error=str(e))
+            stored_regex = pattern
+        
+        # Confidence estimation
+        confidence = 0.9
+        
+        db_utils.create_parser_cache_by_fields(
+            db=db,
+            domain=domain,
+            fields=fields,
+            generated_regex=stored_regex,
+            source_type=source_type,
+            created_by_task_id=task_id,
+            test_matches_count=len(extracted_items),
+            confidence_score=int(confidence * 100),
+            url_pattern=url_pattern,
+            sample_input=source_content[:2000],
+            sample_output=extracted_items[:10]
+        )
+        log_event(task_id, "parser_cached", domain=domain, type=source_type, matches=len(extracted_items))
 
 
 def run_field_extraction(
@@ -386,55 +505,83 @@ CONTENT:
         examples = keywords[:3]
     
     all_matches = []
+    max_attempts = 2
+    similarity_threshold = 0.9
     
     for field in keywords:
         field_examples = [ex for ex in examples if field.lower() in ex.lower()][:3]
         if not field_examples:
             field_examples = [field]
         
-        # Use parser factory for consistent parser generation
-        result = parser_factory.generate_parser(
-             content=search_content,
-             examples=field_examples,
-             target_desc=field,
-             llm=llm
-        )
-        
-        if result.get("success"):
-            pattern = result["pattern"]
-            flags = result.get("flags", "")
-            source_type = result["source_type"]
+        best_field_result = None
+        field_matches = []
+
+        for attempt in range(max_attempts):
+            # Use parser factory for consistent parser generation
+            result = parser_factory.generate_parser(
+                 content=search_content,
+                 examples=field_examples,
+                 target_desc=field,
+                 llm=llm
+            )
             
-            # Execute
-            matches = parser_factory.execute_parser(source_type, pattern, search_content, flags)
-            
-            if matches:
-                log_event(task_id, "field_parser_success", field=field, count=len(matches), type=source_type)
-                # Convert to flat dicts
-                all_matches.extend([{"text": m["text"], "field": field, "source": source_type} for m in matches])
+            if result.get("success"):
+                pattern = result["pattern"]
+                flags = result.get("flags", "")
+                source_type = result["source_type"]
                 
-                if db and domain:
-                    try:
-                        if source_type == "REGEX":
-                            stored = f"(?{flags}){pattern}" if flags else pattern
-                        else:
-                            stored = pattern
-                            
-                        db_utils.create_parser_cache_by_fields(
-                            db=db,
-                            domain=domain,
-                            fields=[field],
-                            generated_regex=stored,
-                            source_type=source_type,
-                            created_by_task_id=task_id,
-                            test_matches_count=len(matches),
-                            confidence_score=85,
-                            url_pattern=url_pattern,
-                            sample_input=search_content[:2000],
-                            sample_output=[{"text": m["text"]} for m in matches[:10]]
-                        )
-                    except Exception as cache_err:
-                        logger.warning(f"Failed to cache field parser: {cache_err}")
+                # Execute
+                matches = parser_factory.execute_parser(source_type, pattern, search_content, flags)
+                
+                if matches:
+                    # Validate similarity
+                    actual_vals = [m.get("text", "") for m in matches]
+                    is_valid, avg_sim = _check_values_similarity(field_examples, actual_vals, threshold=similarity_threshold)
+                    
+                    if is_valid:
+                        logger.info(f"Field parser for '{field}' passed validation (sim={avg_sim:.4f}) on attempt {attempt+1}")
+                        best_field_result = result
+                        field_matches = matches
+                        break
+                    else:
+                        logger.warning(f"Field parser for '{field}' failed validation (sim={avg_sim:.4f}) on attempt {attempt+1}")
+                else:
+                    logger.warning(f"Field parser for '{field}' returned no matches")
+            else:
+                 logger.warning(f"Field parser generation failed for '{field}': {result.get('error')}")
+
+        if best_field_result and field_matches:
+            pattern = best_field_result["pattern"]
+            flags = best_field_result.get("flags", "")
+            source_type = best_field_result["source_type"]
+            matches = field_matches
+
+            log_event(task_id, "field_parser_success", field=field, count=len(matches), type=source_type)
+            # Convert to flat dicts
+            all_matches.extend([{"text": m["text"], "field": field, "source": source_type} for m in matches])
+            
+            if db and domain:
+                try:
+                    if source_type == "REGEX":
+                        stored = f"(?{flags}){pattern}" if flags else pattern
+                    else:
+                        stored = pattern
+                        
+                    db_utils.create_parser_cache_by_fields(
+                        db=db,
+                        domain=domain,
+                        fields=[field],
+                        generated_regex=stored,
+                        source_type=source_type,
+                        created_by_task_id=task_id,
+                        test_matches_count=len(matches),
+                        confidence_score=85,
+                        url_pattern=url_pattern,
+                        sample_input=search_content[:2000],
+                        sample_output=[{"text": m["text"]} for m in matches[:10]]
+                    )
+                except Exception as cache_err:
+                    logger.warning(f"Failed to cache field parser: {cache_err}")
 
     if all_matches:
         log_event(task_id, "field_extraction_success", count=len(all_matches))
