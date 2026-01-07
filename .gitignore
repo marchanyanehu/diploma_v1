@@ -213,5 +213,6 @@ tmp/
 *.dir
 
 
-/course-diploma-projects-docs-main
-/reference_docs
+course-diploma-projects-docs-main
+reference_docs
+tests/htmls/
