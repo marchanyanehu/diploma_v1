@@ -39,13 +39,13 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | --- | --- | --- |
 | **API Backend** | Handles authentication and task management (create task, check status/result, schedule jobs). Orchestrates workers via Celery. | Python 3.11, FastAPI, Uvicorn |
 | **Celery Workers** | Background services performing: |     |
-| &lt;br&gt;- **Headless Worker**: Fetch web pages using Playwright, extract semantic page text and network data. |     |     |
+| <br>- **Headless Worker**: Fetch web pages using Playwright, extract semantic page text and network data. |     |     |
 | <br>- **AI Worker**: Interpret prompt, generate selectors (CSS/Regex/JSON) via LLM, apply selectors for data extraction. | Python, Celery, Redis, Playwright |     |
 | **Scheduler** | Cron-like service (Celery Beat) that enqueues tasks per user-defined schedule in the database. | Python, Celery Beat, Redis |
 | **Database** | Central PostgreSQL database for all data: |     |
-| &lt;br&gt;- _Users_: Auth info |     |     |
-| &lt;br&gt;- _ScrapingTasks_: Task metadata and results |     |     |
-| &lt;br&gt;- _ScheduledJobs_: Cron definitions |     |     |
+| <br>- _Users_: Auth info |     |     |
+| <br>- _ScrapingTasks_: Task metadata and results |     |     |
+| <br>- _ScheduledJobs_: Cron definitions |     |     |
 | <br>- _ParserCache_: Selectors for reuse | PostgreSQL 15, SQLAlchemy ORM |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
 | **External LLMs** | Third-party Large Language Models (OpenAI/Gemini/DeepSeek) used to interpret prompts and generate extraction patterns. | e.g. OpenAI API, Gemini API, DeepSeek (Baseten) |

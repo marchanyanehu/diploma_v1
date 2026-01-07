@@ -162,29 +162,29 @@ This scoping ensures the diploma project emphasizes the core LLM-powered extract
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-201 | **As a user**, I want to submit a scraping request (URL + prompt) via POST /api/v1/process, so that I receive a task ID immediately[\[41\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L110-L118). | \- Returns task_id and status PENDING (HTTP 202) on valid input.&lt;br&gt;- Rejects invalid URLs or injection with 400 error. | Must | ✅   |
-| US-202 | **As a user**, I want to check the status of my task via GET /api/v1/status/{task_id}, so that I know when it's done. | \- Returns current status (PENDING, IN_PROGRESS, SUCCESS, or FAILED) in JSON[\[42\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L158-L167).&lt;br&gt;- Includes timestamps and progress percentage when in-progress. | Must | ✅   |
-| US-203 | **As a user**, I want to retrieve the results of my scraping task via GET /api/v1/result/{task_id}, so that I get the extracted data once available. | \- If task is complete (status=SUCCESS), returns JSON with data, metadata (e.g. total matches, used cache)[\[43\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L197-L205)[\[44\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L240-L249).&lt;br&gt;- If still in-progress, returns 202 with status. | Must | ✅   |
+| US-201 | **As a user**, I want to submit a scraping request (URL + prompt) via POST /api/v1/process, so that I receive a task ID immediately[\[41\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L110-L118). | \- Returns task_id and status PENDING (HTTP 202) on valid input.<br>- Rejects invalid URLs or injection with 400 error. | Must | ✅   |
+| US-202 | **As a user**, I want to check the status of my task via GET /api/v1/status/{task_id}, so that I know when it's done. | \- Returns current status (PENDING, IN_PROGRESS, SUCCESS, or FAILED) in JSON[\[42\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L158-L167).<br>- Includes timestamps and progress percentage when in-progress. | Must | ✅   |
+| US-203 | **As a user**, I want to retrieve the results of my scraping task via GET /api/v1/result/{task_id}, so that I get the extracted data once available. | \- If task is complete (status=SUCCESS), returns JSON with data, metadata (e.g. total matches, used cache)[\[43\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L197-L205)[\[44\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/api-docs/README.md#L240-L249).<br>- If still in-progress, returns 202 with status. | Must | ✅   |
 
 ### Epic 3: Web Data Acquisition
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-301 | **As a developer**, I want a headless browser worker to fetch the target page in full (including JavaScript content), so that the system can extract data even from dynamic websites. | \- On task creation, a Celery worker on queue fetching_queue loads the URL using Playwright.&lt;br&gt;- Stores page text (innerText) and network requests in DB[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48). | Must | ✅   |
+| US-301 | **As a developer**, I want a headless browser worker to fetch the target page in full (including JavaScript content), so that the system can extract data even from dynamic websites. | \- On task creation, a Celery worker on queue fetching_queue loads the URL using Playwright.<br>- Stores page text (innerText) and network requests in DB[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48). | Must | ✅   |
 
 ### Epic 4: LLM Integration & Extraction
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-401 | **As a user**, I want the system to understand my natural-language prompt and generate appropriate extraction patterns, so that relevant data is returned correctly. | \- LLM extracts intent keywords and fields, and generates regex or selectors for target data[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36).&lt;br&gt;- Generated patterns are validated and, if successful, used for data extraction. | Must | ✅   |
-| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as separate fields, so that relationships between fields are preserved. | \- Multi-field queries trigger the "schema extraction" path[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).&lt;br&gt;- Output JSON groups values under field names as objects. | Should | ✅   |
+| US-401 | **As a user**, I want the system to understand my natural-language prompt and generate appropriate extraction patterns, so that relevant data is returned correctly. | \- LLM extracts intent keywords and fields, and generates regex or selectors for target data[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36).<br>- Generated patterns are validated and, if successful, used for data extraction. | Must | ✅   |
+| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as separate fields, so that relationships between fields are preserved. | \- Multi-field queries trigger the "schema extraction" path[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).<br>- Output JSON groups values under field names as objects. | Should | ✅   |
 
 ### Epic 5: Caching & Scheduling
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-501 | **As a user**, I want repeated scraping of the same site/prompt to be faster by reusing previously learned patterns, so that I get quicker responses on repeat queries. | \- Before invoking LLM pipeline, system checks parsers_cache for matching URL and intent[\[47\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L200-L209).&lt;br&gt;- If found, uses cached regex and skips LLM calls (response time significantly faster). | Should | ✅   |
-| US-502 | **As a user**, I want to schedule recurring scraping jobs (cron), so that I can automatically collect updated data over time. | \- Provides POST /api/v1/jobs to create a schedule with fields (URL, prompt, cron).&lt;br&gt;- Celery Beat enqueues tasks per schedule and new runs appear in user's job list. | Could | ✅   |
+| US-501 | **As a user**, I want repeated scraping of the same site/prompt to be faster by reusing previously learned patterns, so that I get quicker responses on repeat queries. | \- Before invoking LLM pipeline, system checks parsers_cache for matching URL and intent[\[47\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L200-L209).<br>- If found, uses cached regex and skips LLM calls (response time significantly faster). | Should | ✅   |
+| US-502 | **As a user**, I want to schedule recurring scraping jobs (cron), so that I can automatically collect updated data over time. | \- Provides POST /api/v1/jobs to create a schedule with fields (URL, prompt, cron).<br>- Celery Beat enqueues tasks per schedule and new runs appear in user's job list. | Could | ✅   |
 
 &lt;!-- docs/02-technical/index.md --&gt;
 
@@ -227,14 +227,14 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | --- | --- | --- |
 | **API Backend** | Handles authentication and task management (create task, check status/result, schedule jobs). Orchestrates workers via Celery. | Python 3.11, FastAPI, Uvicorn[\[34\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L5-L13) |
 | **Celery Workers** | Background services performing: |     |
-| &lt;br&gt;- **Headless Worker**: Fetch web pages using Playwright, extract semantic page text and network data. |     |     |
-| &lt;br&gt;- **AI Worker**: Interpret prompt, generate regex via LLM, apply regex for data extraction. | Python, Celery, Redis, Playwright[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48)[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36) |     |
+| <br>- **Headless Worker**: Fetch web pages using Playwright, extract semantic page text and network data. |     |     |
+| <br>- **AI Worker**: Interpret prompt, generate regex via LLM, apply regex for data extraction. | Python, Celery, Redis, Playwright[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48)[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36) |     |
 | **Scheduler** | Cron-like service (Celery Beat) that enqueues tasks per user-defined schedule in the database. | Python, Celery Beat, Redis[\[27\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L33-L40)[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48) |
 | **Database** | Central PostgreSQL database for all data: |     |
-| &lt;br&gt;- _Users_: Auth info |     |     |
-| &lt;br&gt;- _ScrapingTasks_: Task metadata and results |     |     |
-| &lt;br&gt;- _ScheduledJobs_: Cron definitions |     |     |
-| &lt;br&gt;- _ParserCache_: Regex patterns for reuse | PostgreSQL 15, SQLAlchemy ORM[\[19\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L99-L106)[\[49\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L30-L38) |     |
+| <br>- _Users_: Auth info |     |     |
+| <br>- _ScrapingTasks_: Task metadata and results |     |     |
+| <br>- _ScheduledJobs_: Cron definitions |     |     |
+| <br>- _ParserCache_: Regex patterns for reuse | PostgreSQL 15, SQLAlchemy ORM[\[19\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L99-L106)[\[49\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L30-L38) |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
 | **External LLMs** | Third-party Large Language Models (OpenAI/Gemini/DeepSeek) used to interpret prompts and generate extraction patterns. | e.g. OpenAI API, Gemini API, DeepSeek (Baseten) |
 
