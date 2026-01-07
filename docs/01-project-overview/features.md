@@ -7,7 +7,7 @@
 | **E1: Project Foundation & Infrastructure** | Set up repository, containers, CI/CD, and initial database migrations to enable development. | ✅   |
 | **E2: Core API & User Interaction** | Implement FastAPI endpoints for task submission (/api/v1/process), status polling, result retrieval, user registration, and token-based authentication. | ✅   |
 | **E3: Playwright-based Web Data Acquisition** | Develop a Celery worker using Playwright to fetch pages and extract text/HTML for processing. | ✅   |
-| **E4: LLM Intelligence Pipeline** | Integrate LLM for intent extraction and selector generation (CSS/Regex/JSON). Implement multi-field (schema) and single-field extraction flows with validation loops. | ✅   |
+| **E4: LLM Intelligence Pipeline** | Integrate LLM for intent extraction and selector generation (CSS/Regex/JSON). Implement a unified extraction flow with validation loops for arbitrary field sets. | ✅   |
 | **E5: Caching & Persistence** | Design parsers_cache schema. Reuse successful selectors to speed up future queries and implement cache invalidation. | ✅   |
 | **E6: QA & Documentation** | Write extensive automated tests (unit, integration, performance) and complete system documentation (API docs, user guide, architecture). | ✅   |
 
@@ -32,7 +32,7 @@
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
 | US-401 | **As a user**, I want the system to understand my natural-language prompt and generate appropriate extraction patterns, so that relevant data is returned correctly. | \- LLM extracts intent keywords and fields, and generates regex or selectors for target data.<br>- Generated patterns are validated and, if successful, used for data extraction. | Must | ✅   |
-| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as separate fields, so that relationships between fields are preserved. | \- Multi-field queries trigger the "schema extraction" path.<br>- Output JSON groups values under field names as objects. | Should | ✅   |
+| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as associated fields, so that relationships between fields are preserved. | \- Extracted data groups values under field names as objects.<br>- Output JSON maintains structural associations. | Should | ✅   |
 
 ### Epic 5: Caching & Scheduling
 

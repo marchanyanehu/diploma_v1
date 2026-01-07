@@ -10,7 +10,7 @@
 Traditional scrapers are brittle and require manual creation of RegEx or CSS selectors. We needed a way to allow non-technical users to describe what they want to extract in plain English and have the system autonomously figure out how to find that data on a page.
 
 ### Decision
-We implemented an **AI Intelligence Pipeline** using Large Language Models (LLMs) like GPT-4, Gemini, and DeepSeek. The LLM is used as an "intelligent parser" that receives the page content and user prompt, identifies the relevant fields, and generates robust extraction patterns (specifically RegEx and CSS selectors).
+We implemented an **Intelligent Extraction Pipeline** using Large Language Models (LLMs) such as Baseten (DeepSeek) and Gemini. The LLM is used as an "intelligent parser" that receives the page content and user prompt, identifies the relevant fields, and generates robust extraction patterns (specifically RegEx and CSS selectors) in a single unified flow.
 
 ### Alternatives Considered
 - **Hand-coded templates:** Too rigid; would require a new template for every website.
@@ -37,7 +37,7 @@ We implemented an **AI Intelligence Pipeline** using Large Language Models (LLMs
 
 | # | Requirement | Status | Evidence/Notes |
 |---|-------------|--------|----------------|
-| 1 | LLM Interpretation | ✅ | Uses OpenAI/Gemini/DeepSeek APIs for prompt processing. |
+| 1 | LLM Interpretation | ✅ | Uses Baseten (DeepSeek) as primary and Gemini as fallback for processing. |
 | 2 | Natural Language Support | ✅ | Users submit prompts like "Get all product titles". |
 | 3 | RegEx Generation | ✅ | LLM generates regex patterns for semantic text extraction. |
 | 4 | Adaptive Parsing | ✅ | System can regenerate patterns if the page structure changes. |

@@ -24,7 +24,7 @@ We implemented a comprehensive suite of automated tests using **Pytest**. We set
 
 **Negative:**
 - Writing and maintaining tests adds to development time.
-- Mocking external APIs (OpenAI, Gemini) is necessary for stable tests.
+- Mocking external APIs (Baseten, Gemini) is necessary for stable tests.
 
 ## Implementation Details
 

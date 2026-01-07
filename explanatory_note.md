@@ -22,7 +22,7 @@
 
 **Elevator Pitch**
 
-The _Intelligent Web Data Aggregator_ is a microservices-based backend system that allows users to extract structured data from arbitrary web pages using natural language queries[\[1\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L1-L5)[\[2\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L9-L17). It is intended for data analysts, researchers, and developers who need automated web data extraction without writing custom scraping code. The system accepts a URL and a human-friendly prompt (e.g., "Get all product titles and prices") and uses a combination of headless browser fetching and Large Language Model (LLM) analysis to produce JSON data outputs[\[1\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L1-L5)[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36). By leveraging LLMs for intent extraction and regex generation, it eliminates the need to hard-code scrapers and adapts to changing page layouts. Key outcomes include accelerated integration of new data sources, empowerment of non-technical users through natural language interface, and a fully auditable scheduled scraping pipeline[\[2\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L9-L17)[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79).
+The _Intelligent Web Data Aggregator_ is a microservices-based backend system that allows users to extract structured data from arbitrary web pages using natural language queries[\[1\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L1-L5)[\[2\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L9-L17). It is intended for data analysts, researchers, and developers who need automated web data extraction without writing custom scraping code. The system accepts a URL and a human-friendly prompt (e.g., "Get all product titles and prices") and uses a combination of headless browser fetching and Large Language Model (LLM) analysis to produce JSON data outputs[\[1\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L1-L5)[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36). By leveraging LLMs for intent extraction and selector (CSS/Regex/JSON) generation, it eliminates the need to hard-code scrapers and adapts to changing page layouts. Key outcomes include accelerated integration of new data sources, empowerment of non-technical users through natural language interface, and a fully auditable scheduled scraping pipeline[\[2\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L9-L17)[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79).
 
 **Evaluation Criteria Checklist**
 
@@ -63,8 +63,8 @@ The Intelligent Web Data Aggregator addresses the need for non-technical users (
 | **Problem** | Non-technical users and analysts struggle to extract web data; existing scrapers are brittle and labor-intensive[\[8\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L5-L13)[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79). |
 | **Solution** | A Python/FastAPI backend with LLM-powered scraping. It uses a headless browser to fetch pages and an AI pipeline to interpret the prompt and generate extraction patterns[\[1\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L1-L5)[\[9\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L37). |
 | **Target Users** | Data Analysts, Market Researchers, HR/Recruiters, Journalists, and Developers who need web data in a structured form[\[10\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L9-L16). |
-| **Key Features** | Natural language queries; Semantic content extraction; Dual extraction paths (single-field vs multi-field schema); Smart regex caching; Automated scheduling; Robust authentication and rate limiting[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79)[\[11\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L89-L96). |
-| **Tech Stack** | Python 3.11, FastAPI, SQLAlchemy, PostgreSQL, Redis, Celery, Docker, Playwright, OpenAI/Gemini LLM APIs[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79)[\[12\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L22-L30). |
+| **Key Features** | Natural language queries; Semantic content extraction; Intelligent extraction pipeline (CSS/Regex/JSON); Smart regex caching; Automated scheduling; Robust authentication and rate limiting[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79)[\[11\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L89-L96). |
+| **Tech Stack** | Python 3.11, FastAPI, SQLAlchemy, PostgreSQL, Redis, Celery, Docker, Playwright, Baseten (DeepSeek) & Gemini LLM APIs[\[4\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L70-L79)[\[12\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L22-L30). |
 
 &lt;!-- docs/01-project-overview/problem-and-goals.md --&gt;
 
@@ -95,7 +95,7 @@ Current web scraping solutions require engineers to hand-craft and frequently up
 | --- | --- | --- |
 | Accelerate source onboarding | Reduce time to integrate a new website via LLM-generated extraction patterns | Time to first results < 1 day (vs. weeks manually) |
 | Empower non-technical users | Allow any user to define scraping tasks via natural-language prompts | \>90% of test queries handled without developer support |
-| Minimize maintenance effort | Auto-adapt to minor page changes via LLM (regex regeneration) | 50% fewer manual updates needed for changes |
+| Minimize maintenance effort | Auto-adapt to minor page changes via LLM (selector regeneration) | 50% fewer manual updates needed for changes |
 | Provide scheduling & auditability | Users can schedule recurring extractions; all runs are logged with results | Ability to view logs/history; scheduled jobs run automatically |
 
 &lt;!-- docs/01-project-overview/stakeholders.md --&gt;
@@ -134,7 +134,7 @@ To keep the project focused, the following are explicitly excluded:
 
 - **Large-Scale Distributed Crawling:** No massive web crawler or cluster setup for scraping the entire web. Only user-specified sites are targeted, not bulk crawl operations[\[31\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L48-L55).
 - **Advanced Anti-bot Measures:** Features like proxy rotation, CAPTCHA solving, or advanced bot evasion techniques are not included[\[31\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L48-L55).
-- **Custom ML Model Training:** We will not develop new LLM models; we integrate existing LLM APIs (e.g., OpenAI, Gemini) for prompt-based extraction[\[32\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L50-L53).
+- **Custom ML Model Training:** We will not develop new LLM models; we integrate existing LLM APIs (e.g., Baseten, Gemini) for prompt-based extraction[\[32\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L50-L53).
 - **User Interface (Frontend):** A full-featured web UI is out of scope. The focus is on a backend API (and possibly minimal admin pages) for data extraction.
 - **Export Formats:** Only basic JSON results (and CSV via downstream tools) are provided; rich report generation (PDFs, dashboards) is not covered.
 - **Third-Party Scraping APIs:** The system does not rely on external scraping services; it fetches pages directly via the headless worker.
@@ -152,7 +152,7 @@ This scoping ensures the diploma project emphasizes the core LLM-powered extract
 | **E1: Project Foundation & Infrastructure** | Set up repository, containers, CI/CD, and initial database migrations to enable development[\[33\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TASKS.md#L7-L15). | ✅   |
 | **E2: Core API & User Interaction** | Implement FastAPI endpoints for task submission (/api/v1/process), status polling, result retrieval, user registration, and token-based authentication[\[34\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L5-L13)[\[35\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L101-L110). | ✅   |
 | **E3: Playwright-based Web Data Acquisition** | Develop a Celery worker using Playwright to fetch pages and extract text/HTML for processing[\[36\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TASKS.md#L34-L43)[\[37\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L40-L44). | ✅   |
-| **E4: LLM Intelligence Pipeline** | Integrate LLM for intent extraction and regex generation. Implement multi-field (schema) and single-field extraction flows with validation loops[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36)[\[38\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TASKS.md#L46-L55). | ✅   |
+| **E4: LLM Intelligence Pipeline** | Integrate LLM for intent extraction and selector (CSS/Regex/JSON) generation. Implement a unified extraction flow with validation loops for arbitrary field sets[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36)[\[38\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TASKS.md#L46-L55). | ✅   |
 | **E5: Caching & Persistence** | Design parsers_cache schema. Reuse successful regex parsers to speed up future queries and implement cache invalidation[\[39\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TASKS.md#L62-L70). | ✅   |
 | **E6: QA & Documentation** | Write extensive automated tests (unit, integration, performance) and complete system documentation (API docs, user guide, architecture)[\[40\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TESTING_SUMMARY.md#L71-L80). | ✅   |
 
@@ -176,14 +176,14 @@ This scoping ensures the diploma project emphasizes the core LLM-powered extract
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-401 | **As a user**, I want the system to understand my natural-language prompt and generate appropriate extraction patterns, so that relevant data is returned correctly. | \- LLM extracts intent keywords and fields, and generates regex or selectors for target data[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36).<br>- Generated patterns are validated and, if successful, used for data extraction. | Must | ✅   |
-| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as separate fields, so that relationships between fields are preserved. | \- Multi-field queries trigger the "schema extraction" path[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).<br>- Output JSON groups values under field names as objects. | Should | ✅   |
+| US-401 | **As a user**, I want the system to understand my natural-language prompt and generate appropriate extraction patterns, so that relevant data is returned correctly. | \- LLM extracts intent keywords and fields, and generates selectors (CSS/Regex/JSON) for target data[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36).<br>- Generated patterns are validated and, if successful, used for data extraction. | Must | ✅   |
+| US-402 | **As a user**, I want commonly requested data (like "title, price, description") to be extracted as associated fields, so that relationships between fields are preserved. | \- Extracted data groups values under field names as objects[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).<br>- Output JSON maintains structural associations. | Should | ✅   |
 
 ### Epic 5: Caching & Scheduling
 
 | ID  | User Story | Acceptance Criteria | Priority | Status |
 | --- | --- | --- | --- | --- |
-| US-501 | **As a user**, I want repeated scraping of the same site/prompt to be faster by reusing previously learned patterns, so that I get quicker responses on repeat queries. | \- Before invoking LLM pipeline, system checks parsers_cache for matching URL and intent[\[47\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L200-L209).<br>- If found, uses cached regex and skips LLM calls (response time significantly faster). | Should | ✅   |
+| US-501 | **As a user**, I want repeated scraping of the same site/prompt to be faster by reusing previously learned patterns, so that I get quicker responses on repeat queries. | \- Before invoking LLM pipeline, system checks parsers_cache for matching URL and intent[\[47\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L200-L209).<br>- If found, uses cached selector and skips LLM calls (response time significantly faster). | Should | ✅   |
 | US-502 | **As a user**, I want to schedule recurring scraping jobs (cron), so that I can automatically collect updated data over time. | \- Provides POST /api/v1/jobs to create a schedule with fields (URL, prompt, cron).<br>- Celery Beat enqueues tasks per schedule and new runs appear in user's job list. | Could | ✅   |
 
 &lt;!-- docs/02-technical/index.md --&gt;
@@ -236,7 +236,7 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | <br>- _ScheduledJobs_: Cron definitions |     |     |
 | <br>- _ParserCache_: Regex patterns for reuse | PostgreSQL 15, SQLAlchemy ORM[\[19\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L99-L106)[\[49\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L30-L38) |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
-| **External LLMs** | Third-party Large Language Models (OpenAI/Gemini/DeepSeek) used to interpret prompts and generate extraction patterns. | e.g. OpenAI API, Gemini API, DeepSeek (Baseten) |
+| **External LLMs** | Baseten (DeepSeek) as primary provider with Google (Gemini) as fallback. Used to interpret prompts and generate extraction patterns. | Baseten API, Gemini API |
 
 ### Data Flow
 
@@ -248,13 +248,12 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 - Network responses (XHR JSON, etc.) It stores this raw content linked to the task[\[45\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/services/api/README_services_api.md#L40-L48)[\[3\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L28-L36).
 - **AI Processing:** A Celery task on ai_queue is started. The worker:
 - Extracts intent (target/keywords/fields) from the prompt using an LLM (intent extraction module).
-- Checks the parsers_cache (by URL and intent) for a matching regex[\[48\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L210-L219).
-- If cache hit: use regex on stored content, skip LLM calls. Otherwise, proceed.
-- **Schema Path:** If multiple fields requested, LLM extracts all fields simultaneously (schema_extraction)[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).
-- **Single-Field Path:** LLM finds examples of target data, regex is generated to match those examples.
-- Validate and possibly refine regex (iterative LLM prompts) until adequate accuracy.
-- Save successful regex to parsers_cache.
-- Apply regex to full HTML content to produce structured results (with text, confidence, etc.).
+- Checks the parsers_cache (by URL and intent) for a matching selector[\[48\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L210-L219).
+- If cache hit: use selector on stored content, skip LLM calls. Otherwise, proceed.
+- **Extraction Pipeline:** The system invokes the intelligent extraction flow, generating selectors (CSS/Regex/JSON) from LLM analysis[\[46\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L39-L47).
+- Validate and possibly refine selector (iterative LLM prompts) until adequate accuracy.
+- Save successful selector to parsers_cache.
+- Apply selector to full content to produce structured results (with text, confidence, etc.).
 - **Result Delivery:** Final results (JSON records) and metadata (match count, used cache flag, timing) are saved to the ScrapingTask record (status=SUCCESS or FAILED). The user can retrieve via GET /api/v1/result/{task_id}.
 - **Scheduling:** If the request was a scheduled job, the Scheduler (Beat) enqueues new tasks at the specified cron times automatically.
 
@@ -267,7 +266,7 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | **Celery with Redis** | Proven combo for distributed task queues. Redis is fast, and Celery supports retries and scheduling. | RabbitMQ (more overhead to set up), RQ (less feature-rich) |
 | **Playwright for Headless Fetch** | Modern JS support, active browser automation features, and Python integration. | Selenium (heavier, less performant), requests-HTML (no JS) |
 | **SQLAlchemy ORM** | Strong support for complex schemas and migrations in Python. Ease of writing queries. | Django ORM (heavy for this project), raw SQL (verbose) |
-| **LLM Integration via API** | Leverages state-of-art LLMs (like OpenAI/Gemini) for intent interpretation without building our own model. | Building custom NLP models (too time-consuming) |
+| **LLM Integration via API** | Leverages state-of-art LLMs (Baseten/DeepSeek + Gemini fallback) for intent interpretation without building our own model. | Building custom NLP models (too time-consuming) |
 
 ### Security Overview
 
@@ -294,7 +293,7 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | **Database** | PostgreSQL | 15.x | Reliable relational DB; SQLAlchemy ORM simplifies schema management[\[51\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L32-L40). |
 | **ORM** | SQLAlchemy | 1.4+ | Robust for complex schemas and relations (tasks, caching, users)[\[49\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L30-L38). |
 | **Headless Browser** | Playwright | Latest | Handles modern dynamic pages (JavaScript) in headless mode[\[22\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/reference_docs/BA/BA_reqs-Yan_Marchan.txt#L40-L43). |
-| **LLM APIs** | DeepSeek, Gemini, OpenAI | Various | Provides intelligence without local model training. Fall back options configured. |
+| **LLM APIs** | Baseten (DeepSeek), Gemini | Various | Provides intelligence without local model training. Baseten is primary; Gemini is fallback. |
 | **Containerization** | Docker, Docker Compose | (n/a) | Ensures consistent environments; defines multi-container setup (API, DB, Workers)[\[27\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L33-L40)[\[52\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docker-compose.yml#L1-L8). |
 | **CI/CD** | GitHub Actions (implied) | \-  | Automates testing, linting, and deployment pipelines. |
 | **Testing** | pytest, httpx | Latest | Comprehensive unit and integration tests (coverage >70%)[\[53\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TESTING_SUMMARY.md#L91-L100). |
@@ -339,9 +338,8 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 
 | Service | Purpose | Pricing Model |
 | --- | --- | --- |
-| **OpenAI/GPT** | LLM provider for prompt processing | Pay-as-you-go (per request) |
-| **Gemini (Google)** | Alternative LLM provider | Free tier & paid options |
-| **Baseten/DeepSeek** | Specialized AI model hosting | Subscription-based |
+| **Baseten/DeepSeek** | Primary LLM provider for prompt processing | Subscription-based |
+| **Gemini (Google)** | Fallback LLM provider | Free tier & paid options |
 | **Email/SMS** (optional) | User notifications/alerts | Depends on chosen provider (Twilio, etc.) |
 | _(Others)_ | _(Any other required third-party)_ |     |
 
@@ -725,7 +723,7 @@ This section reflects on the project development process, lessons learned, and f
 ### Technical Successes
 
 - **Microservices Architecture:** Decoupling the system into API, workers, and scheduler made it easier to develop and test each component independently[\[6\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L43-L51)[\[69\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L71-L80).
-- **LLM Integration:** Successfully used GPT/Gemini for prompt interpretation and regex generation, achieving multi-field extraction without hardcoding rules.
+- **LLM Integration:** Successfully used LLMs for prompt interpretation and selector generation, achieving structured data extraction without hardcoding rules.
 - **Automated Testing:** Achieved high test coverage across layers (unit, integration, contract) with organized Pytest suites[\[70\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/TESTING_SUMMARY.md#L90-L100). The comprehensive tests helped ensure system reliability.
 - **Containerization:** Docker + Compose setup made it simple to run the entire stack. This streamlined setup was documented in the README[\[27\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/README.md#L33-L40).
 - **Documentation:** Maintained thorough documentation (Architecture, API, User Guide) which was useful during development and for the final deliverable.
@@ -1179,7 +1177,7 @@ No default seed data is required. A test user and tasks can be added via scripts
 ### Data Extraction
 
 - **Single-field Extraction:** The pipeline used when the prompt asks for one field; involves finding example text and generating a focused regex.
-- **Schema Extraction:** The pipeline for multi-field requests; LLM returns structured output for all fields at once with relationships preserved.
+- **Intelligent Extraction:** The pipeline for structured requests; LLM returns structured output for all fields at once with relationships preserved.
 
 _Document created: 2025-01-05_
 

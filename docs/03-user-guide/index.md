@@ -21,7 +21,7 @@ This project does not include a web UI. Users interact with the system via its R
    ```
 
 2. **Configure Environment**:
-   Copy `.env.example` to `.env` and fill in your API keys (Gemini/OpenAI) and database credentials.
+   Copy `.env.example` to `.env` and fill in your API keys (Baseten/Gemini) and database credentials.
 
 3. **Start services**:
    ```bash

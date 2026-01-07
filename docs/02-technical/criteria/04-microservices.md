@@ -30,7 +30,7 @@ We adopted a **Microservices Architecture**. The system is decomposed into speci
 ### Key Implementation Decisions
 1.  **API Service:** Handles HTTP requests and task orchestration.
 2.  **Headless Worker:** Uses Playwright to fetch pages in background queues.
-3.  **AI Worker:** Handles LLM calls and RegEx generation.
+3.  **AI Worker:** Handles LLM calls and Selector (CSS/Regex/JSON) generation.
 4.  **Scheduler:** Manages periodic cron tasks via Celery Beat.
 
 ## Requirements Checklist
@@ -40,7 +40,7 @@ We adopted a **Microservices Architecture**. The system is decomposed into speci
 | 1 | Service Separation | ✅ | Separate folders and logic for API, Workers, and Scheduler. |
 | 2 | Async Broker | ✅ | Redis used as the central message broker (Celery). |
 | 3 | Independent Scaling | ✅ | Workers can be scaled horizontally via Docker. |
-| 4 | RegEx Generation Service | ✅ | Dedicated worker handles pattern generation logic. |
+| 4 | Selector Generation Service | ✅ | Dedicated worker handles pattern generation logic. |
 
 ## Known Limitations
 - Overhead of running multiple containers on low-resource machines.

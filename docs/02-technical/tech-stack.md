@@ -10,7 +10,7 @@
 | **Database** | PostgreSQL | 15.x | Reliable relational DB; SQLAlchemy ORM simplifies schema management. |
 | **ORM** | SQLAlchemy | 1.4+ | Robust for complex schemas and relations (tasks, caching, users). |
 | **Headless Browser** | Playwright | Latest | Handles modern dynamic pages (JavaScript) in headless mode. |
-| **LLM APIs** | DeepSeek, Gemini, OpenAI | Various | Provides intelligence without local model training. Fall back options configured. |
+| **LLM APIs** | Baseten (DeepSeek), Gemini | Various | Provides intelligence without local model training. Baseten is primary; Gemini is fallback. |
 | **Containerization** | Docker, Docker Compose | (n/a) | Ensures consistent environments; defines multi-container setup (API, DB, Workers). |
 | **CI/CD** | GitHub Actions (implied) | \-  | Automates testing, linting, and deployment pipelines. |
 | **Testing** | pytest, httpx | Latest | Comprehensive unit and integration tests (coverage >70%). |
@@ -55,7 +55,6 @@
 
 | Service | Purpose | Pricing Model |
 | --- | --- | --- |
-| **OpenAI/GPT** | LLM provider for prompt processing | Pay-as-you-go (per request) |
-| **Gemini (Google)** | Alternative LLM provider | Free tier & paid options |
-| **Baseten/DeepSeek** | Specialized AI model hosting | Subscription-based |
+| **Baseten/DeepSeek** | Primary LLM provider for prompt processing | Subscription-based |
+| **Gemini (Google)** | Fallback LLM provider | Free tier & paid options |
 | **Email/SMS** (optional) | User notifications/alerts | Depends on chosen provider (Twilio, etc.) |

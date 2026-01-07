@@ -52,7 +52,7 @@ This document describes the known limitations and constraints of the Intelligent
 
 9. **Rate Limits Apply**
    - API endpoints are rate-limited (10 requests/minute for scraping).
-   - LLM API rate limits from providers (Gemini/OpenAI) apply.
+   - LLM API rate limits from providers (Baseten/Gemini) apply.
    - High-volume scraping not recommended.
 
 10. **Content Processing Strategy**

@@ -48,15 +48,15 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | <br>- _ScheduledJobs_: Cron definitions |     |     |
 | <br>- _ParserCache_: Selectors for reuse | PostgreSQL 15, SQLAlchemy ORM |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
-| **External LLMs** | Third-party Large Language Models (OpenAI/Gemini/DeepSeek) used to interpret prompts and generate extraction patterns. | e.g. OpenAI API, Gemini API, DeepSeek (Baseten) |
+| **External LLMs** | Baseten (DeepSeek) as primary provider with Google (Gemini) as fallback. Used to interpret prompts and generate extraction patterns. | Baseten API, Gemini API |
 
 ### Data Flow
 
 1.  **User Request:** A client sends a JSON request (url + prompt) to `POST /api/v1/process`.
 2.  **Task Creation:** API service validates input, creates a ScrapingTask record (status=PENDING) and enqueues a Celery task to `fetching_queue`.
 3.  **Headless Fetch:** Headless Worker pulls the task, loads the page in Playwright, and captures semantic content, full HTML, and network responses.
-4.  **Initial LLM Extraction:** 
-    *   The system first invokes the LLM Intelligence Pipeline to extract data based on the user's prompt. 
+1.  **Initial LLM Extraction:** 
+    *   The system first invokes the **Intelligent Extraction Pipeline** to extract data based on the user's prompt (handling one or many fields). 
     *   **Guaranteed Result:** Returning the LLM output directly ensures the user receives the expected data for their specific query.
 5.  **Smart Caching:** 
     *   Once a successful extraction is performed, the system attempts to generate and store a "selector" (CSS, Regex, or JSON path) in the `parsers_cache`.
@@ -98,7 +98,7 @@ Understanding these constraints helps set appropriate expectations for the extra
 | **Celery with Redis** | Proven combo for distributed task queues. Redis is fast, and Celery supports retries and scheduling. | RabbitMQ (more overhead to set up), RQ (less feature-rich) |
 | **Playwright for Headless Fetch** | Modern JS support, active browser automation features, and Python integration. | Selenium (heavier, less performant), requests-HTML (no JS) |
 | **SQLAlchemy ORM** | Strong support for complex schemas and migrations in Python. Ease of writing queries. | Django ORM (heavy for this project), raw SQL (verbose) |
-| **LLM Integration via API** | Leverages state-of-art LLMs (like OpenAI/Gemini) for intent interpretation without building our own model. | Building custom NLP models (too time-consuming) |
+| **LLM Integration via API** | Leverages state-of-art LLMs (Baseten/DeepSeek + Gemini fallback) for intent interpretation without building our own model. | Building custom NLP models (too time-consuming) |
 
 ### Security Overview
 
