@@ -236,7 +236,7 @@ As shown, the system is a microservice architecture with a FastAPI backend for u
 | <br>- _ScheduledJobs_: Cron definitions |     |     |
 | <br>- _ParserCache_: Regex patterns for reuse | PostgreSQL 15, SQLAlchemy ORM[\[19\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/docs/ARCHITECTURE.md#L99-L106)[\[49\]](https://github.com/marchanyanehu/diploma_v1/blob/931c2980c9a459ade00ebf5706ce779450939e39/shared/database/models.py#L30-L38) |     |
 | **Cache/Broker** | Redis used both as a Celery broker/back-end and a short-term cache/rate-limit store. | Redis (In-memory data store) |
-| **External LLMs** | Baseten (DeepSeek) as primary provider with Google (Gemini) as fallback. Used to interpret prompts and generate extraction patterns. | Baseten API, Gemini API |
+| **External LLMs** | Baseten (DeepSeek) as primary provider with Google (Gemini) as fallback. Includes automatic switch to Gemini-3.0-Flash for large sources (up to 1M tokens) to handle high-context requirements. | Baseten API, Gemini API |
 
 ### Data Flow
 

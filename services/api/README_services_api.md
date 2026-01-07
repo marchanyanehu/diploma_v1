@@ -175,7 +175,7 @@ Key environment variables (root `.env` or process env):
 | `LLM_PROVIDER` | `baseten` | Primary LLM provider |
 | `LLM_MODEL` | `baseten/deepseek-ai/DeepSeek-V3.2` | Primary model name |
 | `LLM_FALLBACK_PROVIDER` | `gemini` | Fallback provider |
-| `LLM_FALLBACK_MODEL` | `gemini-2.0-flash` | Fallback model name |
+| `LLM_FALLBACK_MODEL` | `gemini-3.0-flash` | Fallback model name |
 | `LLM_REQUEST_TIMEOUT_S` | `60` | LLM request timeout |
 | `SECRET_KEY` | - | JWT signing key |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |

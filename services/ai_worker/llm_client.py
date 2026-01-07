@@ -10,7 +10,9 @@ Environment variables:
   - LLM_PROVIDER (default: "baseten")
   - LLM_MODEL (default: "baseten/deepseek-ai/DeepSeek-V3.2")
   - LLM_FALLBACK_PROVIDER (default: "gemini")
-  - LLM_FALLBACK_MODEL (default: "gemini-2.0-flash")
+  - LLM_FALLBACK_MODEL (default: "gemini-3.0-flash")
+  - LLM_LARGE_CONTEXT_MODEL (default: "gemini-3.0-flash")
+  - LLM_LARGE_CONTEXT_THRESHOLD (default: 100,000 tokens)
   - BASETEN_API_KEY: API key for Baseten-hosted DeepSeek
   - GOOGLE_API_KEY or GEMINI_API_KEY: API key for Google AI Studio (fallback)
   - LLM_REQUEST_TIMEOUT_S (default: 30)
@@ -67,8 +69,8 @@ PROVIDER_MAX_TOKEN_LIMITS = {
 def _resolve_model_name(provider: str, model: str) -> str:
     """Normalize model name for LiteLLM.
 
-    For Gemini/AI Studio, LiteLLM expects names like: "gemini/gemini-2.0-flash".
-    If the input is "gemini-2.5-flash", we prefix with "gemini/".
+    For Gemini/AI Studio, LiteLLM expects names like: "gemini/gemini-3.0-flash".
+    If the input is "gemini-3.0-flash", we prefix with "gemini/".
     If already prefixed (starts with "gemini/"), we return as-is.
     """
     provider_lower = provider.lower()

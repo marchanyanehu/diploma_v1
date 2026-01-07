@@ -10,7 +10,7 @@
 | **Database** | PostgreSQL | 15.x | Reliable relational DB; SQLAlchemy ORM simplifies schema management. |
 | **ORM** | SQLAlchemy | 1.4+ | Robust for complex schemas and relations (tasks, caching, users). |
 | **Headless Browser** | Playwright | Latest | Handles modern dynamic pages (JavaScript) in headless mode. |
-| **LLM APIs** | Baseten (DeepSeek), Gemini | Various | Provides intelligence without local model training. Baseten is primary; Gemini is fallback. |
+| **LLM APIs** | Baseten (DeepSeek), Gemini | Gemini-3.0-Flash (default fallback) | Provides intelligence without local model training. Baseten is primary; Gemini is used for fallback and large context (up to 1M tokens). |
 | **Containerization** | Docker, Docker Compose | (n/a) | Ensures consistent environments; defines multi-container setup (API, DB, Workers). |
 | **CI/CD** | GitHub Actions (implied) | \-  | Automates testing, linting, and deployment pipelines. |
 | **Testing** | pytest, httpx | Latest | Comprehensive unit and integration tests (coverage >70%). |

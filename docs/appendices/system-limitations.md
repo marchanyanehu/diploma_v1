@@ -56,11 +56,11 @@ This document describes the known limitations and constraints of the Intelligent
    - High-volume scraping not recommended.
 
 10. **Content Processing Strategy**
-    - **No practical page size limit** - the system uses snippet extraction, so LLM never sees full HTML.
-    - LLM prompts receive only 32KB snippets, not the whole page.
+    - **Large Context Window** - The system automatically switches to Gemini-3.0-Flash for pages requiring a large context window (up to 1M tokens), allowing it to process full HTML on massive pages.
+    - LLM prompts can handle up to 4 million characters (approx. 1M tokens) when Gemini fallback is active.
     - Regex is applied to the full content using pure Python (no token limits).
     - Defensive memory cap of 1MB for storage, but this rarely matters in practice.
-    - Very large pages work fine due to the snippet-based architecture.
+    - Very large pages work fine due to the high-context fallback architecture.
 
 11. **Session Isolation**
     - Each scraping task is independent.
