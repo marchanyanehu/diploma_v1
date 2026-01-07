@@ -92,7 +92,7 @@ _(All below require auth)_
 
 - **POST /api/v1/jobs**  
     Create a scheduled (cron) scraping job.  
-    **Body:** `{"url": "...", "prompt": "...", "schedule_cron": "0 9 * * *"}`.  
+    **Body:** `{"url": "...", "prompt": "...", "schedule_cron": "0 9 * * *"}`. Supports both 5-field (standard) and 6-field (sub-minute) cron expressions.  
     **Success (200):** JSON object of the new job, e.g.:  
 
 ```json
@@ -100,14 +100,14 @@ _(All below require auth)_
     "id": 1,  
     "url": "https://example.com",  
     "prompt": "Get prices",  
-    "schedule_cron": "0 9 * * *",  
-    "next_run_at": "2025-08-09T09:00:00Z",  
+    "schedule_cron": "*/30 * * * * *",  
+    "next_run_at": "2025-08-08T12:00:30Z",  
     "last_run_at": null,  
     "created_at": "2025-08-08T12:00:00Z"  
 }
 ```
 
-- (Next run is computed by the scheduler).
+- (Next run is computed by the scheduler; high-resolution tasks checked every 10s).
 - **GET /api/v1/jobs**  
     List all jobs for the current user.  
     **Success (200):** JSON array of job objects (as above).

@@ -61,7 +61,7 @@ curl -X GET "http://localhost:8000/api/v1/result/<task_id>" \
 
 ## Feature 2: Scheduling Recurring Jobs
 
-**Overview:** Users can automate data extraction on a schedule (cron-like). For example, daily price or news updates without manual intervention.
+**Overview:** Users can automate data extraction on a schedule (cron-like). The system supports standard cron syntax as well as high-resolution (sub-minute) scheduling with 6-field cron expressions. For example, daily price updates or tracking high-frequency changes every 30 seconds.
 
 ### How to Use
 
@@ -74,12 +74,13 @@ curl -X POST "http://localhost:8000/api/v1/jobs" \
     -d '{  
     "url": "https://prices.example.com/daily",  
     "prompt": "Get latest product prices",  
-    "schedule_cron": "0 9 * * *"  
+    "schedule_cron": "*/30 * * * * *"  
     }'
 ```
 
-- `schedule_cron` uses standard cron syntax (minute hour day month weekday).
+- `schedule_cron` supports both standard 5-field syntax and 6-field syntax (including seconds).
 - Example `"0 9 * * *"` = every day at 9:00 AM.
+- Example `"*/30 * * * * *"` = every 30 seconds.
 - **List Scheduled Jobs**:
 
 ```bash
