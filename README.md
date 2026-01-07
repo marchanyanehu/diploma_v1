@@ -24,11 +24,11 @@ A microservice-based web scraping system powered by LLMs to intelligently extrac
 
 ## Documentation
 
--   📐 [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
--   🤖 [AI Prompts](docs/AI_PROMPTS.md) - Prompt engineering documentation
--   📖 [User Guide](docs/USER_GUIDE.md) - Step-by-step usage instructions
--   ⚠️ [System Limitations](docs/SYSTEM_LIMITATIONS.md) - What the system cannot do
--   💬 [Example Dialogs](docs/EXAMPLE_DIALOGS.md) - 15+ usage examples and test scenarios
+-   📐 [Architecture Overview](docs_old/ARCHITECTURE.md) - System design and data flow
+-   🤖 [AI Prompts](docs_old/AI_PROMPTS.md) - Prompt engineering documentation
+-   📖 [User Guide](docs_old/USER_GUIDE.md) - Step-by-step usage instructions
+-   ⚠️ [System Limitations](docs_old/SYSTEM_LIMITATIONS.md) - What the system cannot do
+-   💬 [Example Dialogs](docs_old/EXAMPLE_DIALOGS.md) - 15+ usage examples and test scenarios
 
 ## Containerization (minimum compliance)
 
@@ -36,11 +36,11 @@ A microservice-based web scraping system powered by LLMs to intelligently extrac
 - Compose: `docker-compose up --build` spins up Postgres, Redis, API, AI Worker (`ai_queue`), Headless Worker (`fetching_queue`), Scheduler (Celery Beat); `depends_on` uses healthchecks; shared network `diploma_network`; volumes `postgres_data`, `redis_data`; headless uses `shm_size: 1gb`.
 - Environment: copy `.env.example` → `.env`. Key vars: `POSTGRES_*`, `DB_*`, `REDIS_URL`/`CELERY_*`, `SECRET_KEY`, `LLM_PROVIDER`/`LLM_MODEL` + `LLM_FALLBACK_*`, API keys (`BASETEN_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`), Playwright tuning (`PLAYWRIGHT_HEADLESS`, timeouts/retries/locale/tz).
 - Resource hints: min 2 vCPU / 4 GB RAM; add +1 GB for Playwright chromium (shm already set to 1GB).
-- Diagrams: container layout and flows shown in `docs/ARCHITECTURE.md` (deployment diagram + API contracts).
+- Diagrams: container layout and flows shown in `docs_old/ARCHITECTURE.md` (deployment diagram + API contracts).
 
 ## Architecture
 
-Microservice layout with shared infrastructure (see `docs/ARCHITECTURE.md` for detailed diagram):
+Microservice layout with shared infrastructure (see `docs_old/ARCHITECTURE.md` for detailed diagram):
 
 ### Services
 

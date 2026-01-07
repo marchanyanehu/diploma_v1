@@ -231,7 +231,7 @@ pytest --cov=services --cov=shared --cov-report=html --cov-report=xml --cov-fail
 
 ## 🔗 Links
 
-- [Full Testing Strategy](../docs/TESTING_STRATEGY.md)
+- [Full Testing Strategy](../docs_old/TESTING_STRATEGY.md)
 - [Test Suite README](README.md)
 - [pytest Documentation](https://docs.pytest.org/)
 - [Coverage.py Documentation](https://coverage.readthedocs.io/)

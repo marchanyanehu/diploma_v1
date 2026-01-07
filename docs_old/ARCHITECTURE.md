@@ -119,7 +119,7 @@ See `reference_docs/DB/data_dictionary.md` for full schema details and ER diagra
 ## API Contracts & Versioning
 
 - Public REST is versioned under `/api/v1/*`; OpenAPI is available at `/docs` (Swagger UI) and `/openapi.json` for contract sharing.
-- Exported snapshot lives at `docs/openapi.json` (regenerate: `python -c "from services.api.main import app; import json, pathlib; pathlib.Path('docs/openapi.json').write_text(json.dumps(app.openapi(), indent=2), encoding='utf-8')"`)
+- Exported snapshot lives at `docs_old/openapi.json` (regenerate: `python -c "from services.api.main import app; import json, pathlib; pathlib.Path('docs_old/openapi.json').write_text(json.dumps(app.openapi(), indent=2), encoding='utf-8')"`)
 - Async contracts between services are Celery tasks with explicit queues: `ai_queue` for AI Worker, `fetching_queue` for Headless Worker; scheduler publishes to `ai_queue`.
 - Health/readiness endpoints: `/health` (liveness) and `/api/v1/health` (liveness + DB check).
 

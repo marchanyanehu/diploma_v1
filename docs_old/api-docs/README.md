@@ -6973,7 +6973,7 @@ This document describes the comprehensive documentation strategy for the Intelli
 ### Information Architecture
 
 ```
-docs/api-docs/
+docs_old/api-docs/
 ├── README.md                      # Documentation hub & navigation
 ├── GETTING_STARTED.md             # Quick start guide
 ├── API_REFERENCE.md               # Complete endpoint reference
@@ -7105,7 +7105,7 @@ class ScrapeRequest(BaseModel):
 
 #### Current: File-Based
 
-**Location**: `docs/api-docs/` directory
+**Location**: `docs_old/api-docs/` directory
 
 **Access**: Via repository (GitHub/GitLab)
 
@@ -7143,10 +7143,10 @@ class ScrapeRequest(BaseModel):
 npm install -g @stoplight/spectral-cli
 
 # Validate OpenAPI spec
-spectral lint docs/openapi.json
+spectral lint docs_old/openapi.json
 
 # Check for breaking changes
-spectral lint --ruleset breaking-changes.yaml docs/openapi.json
+spectral lint --ruleset breaking-changes.yaml docs_old/openapi.json
 ```
 
 **Spectral Ruleset** (`.spectral.yaml`):
@@ -7421,13 +7421,13 @@ def test_documentation_examples():
 **Link Validation**:
 ```bash
 # Check for broken links
-markdown-link-check docs/api-docs/*.md
+markdown-link-check docs_old/api-docs/*.md
 ```
 
 **OpenAPI Validation**:
 ```bash
 # Validate OpenAPI spec
-spectral lint docs/openapi.json
+spectral lint docs_old/openapi.json
 
 # Check for breaking changes
 openapi-diff docs/openapi-v1.json docs/openapi-v2.json

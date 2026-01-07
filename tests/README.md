@@ -431,7 +431,7 @@ def test_with_mock():
 
 ## Resources
 
-- [Detailed Testing Strategy](../docs/TESTING_STRATEGY.md)
+- [Detailed Testing Strategy](../docs_old/TESTING_STRATEGY.md)
 - [pytest Documentation](https://docs.pytest.org/)
 - [FastAPI Testing](https://fastapi.tiangolo.com/tutorial/testing/)
 - [Test Requirements](../reference_docs/auto_tests/requirements_tests.md)

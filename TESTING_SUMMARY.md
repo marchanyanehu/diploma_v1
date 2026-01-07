@@ -70,7 +70,7 @@ This document summarizes the comprehensive testing suite created for the Intelli
 
 ### Documentation Created
 
-1. **docs/TESTING_STRATEGY.md** (comprehensive testing strategy)
+1. **docs_old/TESTING_STRATEGY.md** (comprehensive testing strategy)
    - Testing philosophy and principles
    - Coverage metrics and targets
    - Test categories and structure
@@ -332,7 +332,7 @@ pytest --cov=services --cov=shared --cov-fail-under=70
 
 ## 📚 Documentation References
 
-- **[Testing Strategy](docs/TESTING_STRATEGY.md)**: Complete testing philosophy and approach
+- **[Testing Strategy](docs_old/TESTING_STRATEGY.md)**: Complete testing philosophy and approach
 - **[Test Suite README](tests/README.md)**: Quick start and usage guide
 - **[Requirements](reference_docs/auto_tests/requirements_tests.md)**: Original requirements
 
