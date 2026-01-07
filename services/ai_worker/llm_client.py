@@ -38,22 +38,29 @@ from typing import Any, Dict, List, Optional
 from time import monotonic
 
 if _il_util.find_spec("litellm") is not None:  # pragma: no cover - simple availability check
-    from litellm import completion  # type: ignore
+    from litellm import completion, token_counter  # type: ignore
 else:  # Fallback shim so import doesn't explode in test envs without litellm
     def completion(*args, **kwargs):  # type: ignore[no-redef]
         raise RuntimeError(
             "litellm is not installed. Install 'litellm' (e.g. pip install litellm) to enable real LLM calls."
         )
 
+    def token_counter(*args, **kwargs):  # type: ignore[no-redef]
+        return 0
+
 
 logger = logging.getLogger(__name__)
 DEFAULT_PROVIDER = "baseten"
 DEFAULT_MODEL = "baseten/deepseek-ai/DeepSeek-V3.2"
 DEFAULT_FALLBACK_PROVIDER = "gemini"
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.0-flash"
+DEFAULT_GEMINI_LARGE_CONTEXT_MODEL = "gemini-3.0-flash"
+LARGE_CONTEXT_TOKEN_THRESHOLD = 100_000
+
 PROVIDER_MAX_TOKEN_LIMITS = {
     # Baseten DeepSeek returns 400s if max_tokens exceeds 262_144
     "baseten": 262_144,
+    "gemini": 1_000_000,
 }
 
 
@@ -107,6 +114,8 @@ class LLMClientConfig:
     model: str = DEFAULT_MODEL
     fallback_provider: str = DEFAULT_FALLBACK_PROVIDER
     fallback_model: str = DEFAULT_GEMINI_MODEL
+    large_context_model: str = DEFAULT_GEMINI_LARGE_CONTEXT_MODEL
+    large_context_threshold: int = LARGE_CONTEXT_TOKEN_THRESHOLD
     timeout_s: int = 30
     max_retries: int = 2
     temperature: float = 0.2
@@ -126,6 +135,11 @@ class LLMClient:
         self.fallback_model_name = (
             _resolve_model_name(config.fallback_provider, config.fallback_model)
             if config.fallback_model
+            else None
+        )
+        self.large_context_model_name = (
+            _resolve_model_name("gemini", config.large_context_model)
+            if config.large_context_model
             else None
         )
         self.has_fallback = bool(self.fallback_model_name)
@@ -183,6 +197,24 @@ class LLMClient:
             except Exception:
                 fallback_model = DEFAULT_GEMINI_MODEL
 
+        large_context_model = os.getenv("LLM_LARGE_CONTEXT_MODEL")
+        if not large_context_model:
+            try:
+                from shared.config import settings  # type: ignore
+                large_context_model = getattr(settings, "llm_large_context_model", DEFAULT_GEMINI_LARGE_CONTEXT_MODEL)
+            except Exception:
+                large_context_model = DEFAULT_GEMINI_LARGE_CONTEXT_MODEL
+
+        large_context_threshold_env = os.getenv("LLM_LARGE_CONTEXT_THRESHOLD")
+        if large_context_threshold_env:
+            large_context_threshold = int(large_context_threshold_env)
+        else:
+            try:
+                from shared.config import settings  # type: ignore
+                large_context_threshold = getattr(settings, "llm_large_context_threshold", LARGE_CONTEXT_TOKEN_THRESHOLD)
+            except Exception:
+                large_context_threshold = LARGE_CONTEXT_TOKEN_THRESHOLD
+
         timeout_s = int(os.getenv("LLM_REQUEST_TIMEOUT_S", "30"))
         max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
@@ -198,6 +230,8 @@ class LLMClient:
             model=model,
             fallback_provider=fallback_provider,
             fallback_model=fallback_model,
+            large_context_model=large_context_model,
+            large_context_threshold=large_context_threshold,
             timeout_s=timeout_s,
             max_retries=max_retries,
             temperature=temperature,
@@ -336,6 +370,23 @@ class LLMClient:
                     )
                     time.sleep(backoff)
             raise RuntimeError(f"{label} LLM request failed after {retry_count + 1} attempts: {last_exc}")
+
+        # Check for large context and potentially force Gemini fallback
+        try:
+            # We use a generic model name for counting if possible, or just the primary
+            token_count = token_counter(model=self.model_name, messages=messages)
+        except Exception:
+            token_count = 0
+
+        if token_count > self.config.large_context_threshold and self.large_context_model_name:
+            logger.info(
+                "Input size (%d tokens) exceeds threshold (%d); switching to large-context model: %s",
+                token_count,
+                self.config.large_context_threshold,
+                self.large_context_model_name,
+            )
+            # Use the large context model as the "primary" for this request
+            return _run_with_retries(self.large_context_model_name, "large-context")
 
         try:
             return _run_with_retries(self.model_name, "primary")

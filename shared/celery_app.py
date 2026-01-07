@@ -61,10 +61,12 @@ def _make_celery() -> Celery:
         task_routes={
             "services.headless_worker.tasks.*": {"queue": "fetching_queue"},
             "services.ai_worker.tasks.*": {"queue": "ai_queue"},
+            "services.scheduler.tasks.*": {"queue": "ai_queue"},
             "scrape.fetch_url": {"queue": "fetching_queue"},
             "scrape.fetch_page": {"queue": "fetching_queue"},
             "scrape.process_request_full": {"queue": "ai_queue"},
             "scrape.process_content": {"queue": "ai_queue"},
+            "scheduler.check_due_jobs": {"queue": "ai_queue"},
         },
         beat_schedule={
             "check-every-minute": {

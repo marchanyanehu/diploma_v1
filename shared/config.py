@@ -78,7 +78,9 @@ class Settings(BaseForSettings):  # type: ignore[misc]
     llm_provider: str = Field(default="baseten", alias="LLM_PROVIDER")  # default to Baseten DeepSeek
     llm_model: str = Field(default="baseten/deepseek-ai/DeepSeek-V3.2", alias="LLM_MODEL")
     llm_fallback_provider: str = Field(default="gemini", alias="LLM_FALLBACK_PROVIDER")
-    llm_fallback_model: str = Field(default="gemini-2.0-flash", alias="LLM_FALLBACK_MODEL")
+    llm_fallback_model: str = Field(default="gemini-3.0-flash", alias="LLM_FALLBACK_MODEL")
+    llm_large_context_model: str = Field(default="gemini-3.0-flash", alias="LLM_LARGE_CONTEXT_MODEL")
+    llm_large_context_threshold: int = Field(default=100000, alias="LLM_LARGE_CONTEXT_THRESHOLD")
     
     # Security
     secret_key: str = Field(default="your-secret-key-change-in-production", alias="SECRET_KEY")

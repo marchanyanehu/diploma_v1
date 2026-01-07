@@ -155,7 +155,9 @@ def run_schema_extraction(
     else:
         content_for_llm = inner_text or ""
     
-    content_snippet = content_for_llm[:100000]
+    # If using a large-context capable model (like Gemini), we can afford a much larger snippet.
+    # 1M tokens is roughly 3-4MB of text.
+    content_snippet = content_for_llm[:4000000]
     
     # 2. LLM Extraction
     fields_list = ", ".join(schema_fields)

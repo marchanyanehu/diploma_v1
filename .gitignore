@@ -211,3 +211,7 @@ tmp/
 *.dat
 *.bak
 *.dir
+
+
+/course-diploma-projects-docs-main
+/reference_docs
