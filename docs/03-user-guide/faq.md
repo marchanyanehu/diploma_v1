@@ -46,7 +46,7 @@ A: Each result includes a source field indicating how it was extracted (e.g. gen
 
 ### Troubleshooting Steps
 
-- Check the [System Limitations](SYSTEM_LIMITATIONS.md) for known constraints (e.g. request size limits).
-- Review [Example Dialogs](EXAMPLE_DIALOGS.md) for sample successful prompts.
+- Check the [System Limitations](../appendices/system-limitations.md) for known constraints (e.g. request size limits).
+- Review [Example Dialogs](../appendices/example-dialogs.md) for sample successful prompts.
 - Use the Swagger UI (/docs) to interactively test endpoints and view models.
 - If problems persist, check service logs (if accessible) for errors in the backend.

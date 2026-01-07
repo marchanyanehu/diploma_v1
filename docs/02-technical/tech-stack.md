@@ -59,4 +59,3 @@
 | **Gemini (Google)** | Alternative LLM provider | Free tier & paid options |
 | **Baseten/DeepSeek** | Specialized AI model hosting | Subscription-based |
 | **Email/SMS** (optional) | User notifications/alerts | Depends on chosen provider (Twilio, etc.) |
-| _(Others)_ | _(Any other required third-party)_ |     |

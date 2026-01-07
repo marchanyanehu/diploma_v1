@@ -13,10 +13,10 @@
 
 | Resource | URL |
 | --- | --- |
-| Production | (Not deployed) |
+| Production | Internal API Service (Deployment pending) |
 | Repository | GitHub - marchanyanehu/diploma_v1 |
 | API Docs | [Swagger UI](/docs) (Available at /docs on running server) |
-| Design | (No external design documents) |
+| Design | N/A (Local microservices architecture) |
 
 **Elevator Pitch**
 
@@ -40,8 +40,7 @@ The _Intelligent Web Data Aggregator_ is a microservices-based backend system th
 - [Technical Implementation](02-technical/index.md) - System architecture, tech stack, deployment, and design decisions.
 - [User Guide](03-user-guide/index.md) - Instructions for using the system.
 - [Retrospective](04-retrospective/index.md) - Lessons learned and future improvements.
-- [Appendices](appendices/api-reference.md) - API Reference, Database Schema, and Glossary.
-
+- [Appendices](appendices/glossary.md) - API Reference, DB Schema, System Limitations, and Example Dialogs.
 
 _Document created: 2025-01-05_  
 _Last updated: 2025-01-05_

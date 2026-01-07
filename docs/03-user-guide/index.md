@@ -4,20 +4,55 @@ This section provides instructions for end users on how to use the application.
 
 ## Contents
 
-- [Getting Started](getting-started.md) _(not applicable/no UI)_
+- [Getting Started](#getting-started)
 - [Features Walkthrough](features.md) - How to perform key tasks (via API).
 - [FAQ & Troubleshooting](faq.md) - Common questions and issues.
 
 ## Getting Started
 
-This project does not include a web UI. Users interact with the system via its REST API. To get started:
+This project does not include a web UI. Users interact with the system via its REST API.
 
-- **Register for an account**: Send POST /auth/register with JSON body {"username": "...", "password": "...", "email": "..."}.
-- **Obtain a token**: Send POST /auth/token with form data username & password to receive a JWT access token.
-- **Use the API**: Include the token in the Authorization: Bearer &lt;token&gt; header in subsequent requests.
-- **Submit a scraping task**: POST /api/v1/process with JSON {"url": "&lt;target_url&gt;", "prompt": "&lt;what to extract&gt;"}.
-- **Poll status**: GET /api/v1/status/{task_id} until status = SUCCESS.
-- **Retrieve results**: GET /api/v1/result/{task_id} to receive JSON data with extracted items.
+### Installation & Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/marchanyanehu/diploma_v1.git
+   cd diploma_v1
+   ```
+
+2. **Configure Environment**:
+   Copy `.env.example` to `.env` and fill in your API keys (Gemini/OpenAI) and database credentials.
+
+3. **Start services**:
+   ```bash
+   docker-compose up --build
+   ```
+
+### First Task Example
+
+1. **Register for an account**: 
+   ```bash
+   curl -X POST http://localhost:8000/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"username": "testuser", "password": "yourpassword", "email": "test@example.com"}'
+   ```
+
+2. **Obtain a token**: 
+   ```bash
+   curl -X POST http://localhost:8000/auth/token \
+     -d "username=testuser&password=yourpassword"
+   ```
+
+3. **Submit a scraping task**: 
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/process \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://example.com", "prompt": "Extract all headings"}'
+   ```
+
+4. **Poll status and retrieve results**: 
+   Use `GET /api/v1/status/{task_id}` and `GET /api/v1/result/{task_id}`.
 
 Swagger UI at /docs (e.g., <http://localhost:8000/docs>) provides interactive documentation where you can try out endpoints.
 
