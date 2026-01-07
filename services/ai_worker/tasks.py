@@ -159,10 +159,27 @@ def process_content(task_id: str, url: str, intent: Dict, inner_text: str, html_
         
         # 1. Try cache first (field-based caching for semantic content)
         if extract_fields:
+            # 1a. Try SEMANTIC / REGEX on inner_text
             cache_result = workflows.check_cached_parser(
                 db, domain, extract_fields, inner_text, 
                 source_type="SEMANTIC", min_matches=1, url_pattern=url_pattern
             )
+            
+            # 1b. If no hit, try CSS / HTML on html_content
+            if not cache_result["matches"] and html_content:
+                # Try CSS specifically as many parsers are cached this way by the factory
+                cache_result = workflows.check_cached_parser(
+                    db, domain, extract_fields, html_content, 
+                    source_type="CSS", min_matches=1, url_pattern=url_pattern
+                )
+                
+                if not cache_result["matches"]:
+                    # Fallback to general HTML source type
+                    cache_result = workflows.check_cached_parser(
+                        db, domain, extract_fields, html_content, 
+                        source_type="HTML", min_matches=1, url_pattern=url_pattern
+                    )
+
             if cache_result["matches"]:
                 extracted_data = cache_result["matches"]
                 used_parser = cache_result["used_parser"]
