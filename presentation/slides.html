@@ -191,6 +191,34 @@
             align-items: stretch;
         }
 
+        /* Evaluation criteria slide helpers */
+        .criteria p {
+            font-size: 24px;
+            line-height: 1.45;
+            color: #2c3e50;
+            margin: 10px 0;
+        }
+
+        .criteria ul {
+            font-size: 24px;
+            line-height: 1.5;
+            margin-top: 10px;
+        }
+
+        .criteria li {
+            margin-bottom: 10px;
+        }
+
+        .criteria .label {
+            font-weight: 800;
+            color: #34495e;
+        }
+
+        .criteria pre {
+            font-size: 18px;
+            line-height: 1.35;
+        }
+
         .screenshot-placeholder.small {
             font-size: 24px;
             min-height: 420px;
@@ -206,21 +234,23 @@
             <h1>Intelligent Web Data Aggregator</h1>
             <h2>LLM-assisted Web Extraction API</h2>
             <p style="font-size: 32px; margin-top: 40px;">Student: Yan Marchan</p>
+            <p style="font-size: 28px;">Program: Informatics (3rd year)</p>
             <p style="font-size: 28px;">Supervisor: Evgeniy Tretyak</p>
             <p style="font-size: 24px; color: #7f8c8d;">Jan 2026</p>
         </div>
     </div>
 
-    <!-- Slide 2: Motivation -->
+    <!-- Slide 2: Problem -->
     <div class="slide">
-        <h2>Motivation</h2>
+        <h2>Problem</h2>
         <ul>
-            <li>Teams need fresh web data: <strong>prices</strong>, <strong>job posts</strong>, <strong>news</strong>,
-                <strong>catalogs</strong>, <strong>events</strong>.</li>
+            <li><strong>Need:</strong> teams need fresh web data (<strong>prices</strong>, <strong>job posts</strong>,
+                <strong>news</strong>, <strong>catalogs</strong>, <strong>events</strong>).</li>
+            <li><strong>Target users:</strong> analysts, product teams, procurement, recruiters, researchers.</li>
             <li>Modern sites are dynamic (JavaScript rendering) and change layout frequently.</li>
             <li>Classic scrapers rely on brittle patterns (<code>CSS/XPath/regex</code>) and require constant
                 maintenance.</li>
-            <li>Goal: reduce “developer-in-the-loop” parsing work and speed up onboarding new sources.</li>
+            <li><strong>Impact:</strong> stale data and high engineering cost for every new source / redesign.</li>
         </ul>
     </div>
 
@@ -288,9 +318,18 @@ Redis (Celery broker / rate-limit store)
             <li><strong>Persist result:</strong> save JSON + metadata; client polls <code>/api/v1/status</code> and
                 <code>/api/v1/result</code>.</li>
         </ol>
+    </div>
+
+    <!-- Slide 6A: Appendix — End-to-End Flow -->
+    <div class="slide">
+        <h2>Appendix: End-to-End Flow (Notes)</h2>
         <ul>
             <li><strong>Cost control:</strong> LLM sees focused snippets (not full HTML); parsers run locally on full
                 content.</li>
+            <li><strong>Traceability:</strong> intent + sources are stored; correlation IDs help follow logs end-to-end.
+            </li>
+            <li><strong>Cache behavior:</strong> cache hit skips parser generation; stale parsers are invalidated and
+                regenerated.</li>
         </ul>
     </div>
 
@@ -306,6 +345,11 @@ Redis (Celery broker / rate-limit store)
             <li><strong>Scheduling:</strong> <code>POST/GET/DELETE /api/v1/jobs</code></li>
             <li><strong>Rate limits:</strong> process 10/min, register 5/min, login 10/min (per IP)</li>
         </ul>
+    </div>
+
+    <!-- Slide 7A: Appendix — API Example -->
+    <div class="slide">
+        <h2>Appendix: API Example (Create Task)</h2>
         <pre>
 POST /api/v1/process
 {
@@ -374,62 +418,73 @@ POST /api/v1/process
         </ul>
     </div>
 
-    <!-- Slide 11: Caching & Self-Healing -->
-    <div class="slide">
-        <h2>Parser Cache & Self-Healing</h2>
-        <ul>
-            <li><strong>Cache key:</strong> domain + <strong>full URL</strong> + fields (+ source type).</li>
-            <li><strong>Stored:</strong> parser pattern (regex/CSS/JSONPath), confidence, samples, and usage metadata.
-            </li>
-            <li><strong>Auto-invalidation:</strong> if a cached parser stops working (0/invalid matches), it is removed
-                and regenerated.</li>
-            <li><strong>Benefit:</strong> fewer LLM calls on repeated pages and faster extraction on cache hits.</li>
-        </ul>
-    </div>
+    <!-- Slides 11–17: Evaluation Criteria (from diploma_thesis.md) -->
 
-    <!-- Slide 12: Cache Hit Check -->
-    <div class="slide">
-        <h2>Cache Hit Check (Same URL + Intent)</h2>
+    <!-- Slide 11: Criterion 1 — Back-end -->
+    <div class="slide criteria">
+        <h2>Criterion: Back-end</h2>
+        <p><span class="label">WHY:</span> Long-running extraction needs an async API with a reliable task lifecycle and
+            clear contracts.</p>
+        <p><span class="label">WHAT:</span></p>
         <ul>
-            <li><strong>Intent normalization:</strong> prompt → intent → normalized fields (<code>schema_fields</code> /
-                <code>keywords</code>).</li>
-            <li><strong>Lookup key:</strong> <code>(domain, full_url, fields, source_type)</code> (exact URL match).</li>
-            <li><strong>First run:</strong> Headless Worker always captures <code>semantic_text</code> and stores it as
-                task <code>page_content</code> for traceability.</li>
-            <li><strong>Cache hit:</strong> apply cached parser locally → skip LLM generation → <code>used_cached_parser=true</code>.</li>
-            <li><strong>Cache miss:</strong> run LLM extraction → generate + validate parser → cache it for next time.</li>
+            <li>FastAPI endpoints for auth, task creation, status polling, results, and cron jobs.</li>
+            <li>Async orchestration: API → Celery queues → workers → persisted result JSON.</li>
+            <li>Validation + rate limits + correlation IDs for safe, traceable execution.</li>
+            <li>JWT-protected access to user-owned tasks and schedules.</li>
         </ul>
+        <p><span class="label">TECH:</span> FastAPI, Uvicorn, Pydantic, Celery, Redis, SlowAPI, JWT.</p>
         <pre>
-fields = normalize(intent.schema_fields or intent.keywords)
-key    = (domain, full_url, fields)
-
-if cache.has(key, source="SEMANTIC"):
-    data = run_parser(cache[key], semantic_text)
-elif cache.has(key, source="CSS/HTML"):
-    data = run_parser(cache[key], html)
-else:
-    data = llm_extract(semantic_text/html)
-    cache.store(key, validated_parser)
-
-return { data, metadata: { used_cached_parser } }
+POST /api/v1/process  → task_id
+GET  /api/v1/status/{task_id}
+GET  /api/v1/result/{task_id}
+POST /api/v1/jobs (cron)
         </pre>
     </div>
 
-    <!-- Slide 12: Scheduling -->
-    <div class="slide">
-        <h2>Scheduling</h2>
+    <!-- Slide 12: Criterion 2 — AI assistant / Chatbot -->
+    <div class="slide criteria">
+        <h2>Criterion: AI assistant / Chatbot</h2>
+        <p><span class="label">WHY:</span> Web pages change frequently; intent-driven extraction reduces brittle
+            selector/regex maintenance.</p>
+        <p><span class="label">WHAT:</span></p>
         <ul>
-            <li><strong>Feature:</strong> recurring collection for the same URL + prompt.</li>
-            <li><strong>API:</strong> create cron schedule via <code>POST /api/v1/jobs</code>.</li>
-            <li><strong>Implementation:</strong> Scheduler service runs Celery Beat and enqueues due jobs every minute.
-            </li>
-            <li><strong>Result:</strong> each run creates a normal scraping task with stored history/results.</li>
+            <li>Prompt → intent (<code>schema_fields</code>/<code>keywords</code>) + normalization.</li>
+            <li>LLM-assisted extraction using semantic text + focused snippets (cost control).</li>
+            <li>Parser generation (regex/CSS/JSONPath) with validation + retries.</li>
+            <li>Cache + self-healing: reuse on hit, invalidate + regenerate on failure.</li>
         </ul>
+        <p><span class="label">TECH:</span> LiteLLM (Baseten/DeepSeek, Gemini fallback), prompt templates, local parser
+            execution/validation.</p>
+        <pre>
+prompt → intent(fields)
+semantic_text/html → LLM extract examples/items
+→ generate parser → validate → cache(url + fields)
+→ run parser locally on full content
+        </pre>
     </div>
 
-    <!-- Slide 13: Persistence -->
-    <div class="slide">
-        <h2>Persistence Model (PostgreSQL)</h2>
+    <!-- Slide 13: Criterion 3 — Database -->
+    <div class="slide criteria">
+        <h2>Criterion: Database</h2>
+        <p><span class="label">WHY:</span> Need ACID storage for users, tasks, results, schedules, and cached parsers (plus
+            captured page artifacts).</p>
+        <p><span class="label">WHAT:</span></p>
+        <ul>
+            <li>Store users, tasks, results, schedules, and extraction metadata.</li>
+            <li>Persist captured artifacts (semantic text, HTML, network previews) with defensive truncation.</li>
+            <li>Parser cache indexed by <strong>domain + full URL + fields</strong> for reliable cache hits.</li>
+        </ul>
+        <p><span class="label">TECH:</span> PostgreSQL 15, SQLAlchemy, Alembic migrations.</p>
+        <pre>
+ScrapingTasks → TaskSourceData (semantic_text/html/network)
+Users → ScheduledJobs (cron)
+ParserCache key: (domain, full_url, fields, source_type)
+        </pre>
+    </div>
+
+    <!-- Slide 13A: Appendix — Database Entities -->
+    <div class="slide criteria">
+        <h2>Appendix: Database Entities</h2>
         <table>
             <tr>
                 <th>Entity</th>
@@ -437,60 +492,125 @@ return { data, metadata: { used_cached_parser } }
             </tr>
             <tr>
                 <td>Users</td>
-                <td>JWT authentication + ownership of tasks and schedules</td>
+                <td>Authentication + ownership</td>
             </tr>
             <tr>
                 <td>ScrapingTasks</td>
-                <td>Status lifecycle, prompt, intent (JSON), sources (text/HTML), extracted JSON results</td>
+                <td>Status, prompt, extracted JSON, metadata</td>
+            </tr>
+            <tr>
+                <td>TaskSourceData</td>
+                <td>Semantic text / HTML / network previews</td>
             </tr>
             <tr>
                 <td>ScheduledJobs</td>
-                <td>Cron schedules linked to user; next-run bookkeeping</td>
+                <td>Cron schedules per user</td>
             </tr>
             <tr>
                 <td>ParserCache</td>
-                <td>Validated parsers (regex/CSS/JSONPath) for reuse + samples/confidence</td>
+                <td>Reusable validated parsers + samples</td>
             </tr>
         </table>
     </div>
 
-    <!-- Slide 14: Reliability & Observability -->
-    <div class="slide">
-        <h2>Reliability & Observability</h2>
+    <!-- Slide 14: Criterion 4 — Microservices -->
+    <div class="slide criteria">
+        <h2>Criterion: Microservices</h2>
+        <p><span class="label">WHY:</span> Separate fetching/rendering and LLM work from the API to scale independently and
+            isolate failures.</p>
+        <p><span class="label">WHAT:</span></p>
         <ul>
-            <li><strong>Correlation IDs:</strong> <code>X-Correlation-Id</code> propagated API → Celery → workers for
-                traceable logs.</li>
-            <li><strong>Health:</strong> <code>/health</code> (liveness) and <code>/api/v1/health</code> (includes DB
-                check).</li>
-            <li><strong>Timeouts/retries:</strong> Playwright + LLM timeouts configurable via environment variables.</li>
-            <li><strong>Dockerized:</strong> services have health checks and compose dependency conditions.</li>
+            <li>API service handles auth + task creation and exposes OpenAPI/Swagger.</li>
+            <li>Headless Worker renders pages (Playwright) and captures semantic text + HTML.</li>
+            <li>AI Worker runs intent/extraction/parsing and updates the DB.</li>
+            <li>Scheduler (Celery Beat) enqueues due cron jobs.</li>
         </ul>
+        <p><span class="label">TECH:</span> Celery (queues: <code>fetching_queue</code>, <code>ai_queue</code>), Redis,
+            Postgres, Playwright.</p>
+        <pre>
+API  →  Redis/Celery  →  Headless Worker  →  AI Worker  →  Postgres
+                  Scheduler (Beat) enqueues recurring jobs
+        </pre>
     </div>
 
-    <!-- Slide 15: Security Controls -->
-    <div class="slide">
-        <h2>Security Controls</h2>
+    <!-- Slide 15: Criterion 5 — Automated tests ≥ 70% coverage -->
+    <div class="slide criteria">
+        <h2>Criterion: Automated tests ≥ 70% coverage</h2>
+        <p><span class="label">WHY:</span> Prevent regressions in API contracts and extraction workflows across multiple
+            services.</p>
+        <p><span class="label">WHAT:</span></p>
         <ul>
-            <li><strong>JWT auth:</strong> all task and scheduler endpoints require a Bearer token.</li>
-            <li><strong>Rate limiting:</strong> slowapi limits key endpoints to reduce abuse.</li>
-            <li><strong>Input sanitization:</strong> blocks prompt-injection/jailbreak patterns before processing.</li>
-            <li><strong>Secrets:</strong> API keys and credentials are provided via environment variables (no secrets in
-                code).</li>
+            <li>Pytest suite covering unit + integration + API contract/workflow tests.</li>
+            <li>Coverage tracked with <code>pytest-cov</code>; baseline above the requirement.</li>
+            <li>Tests validate critical metadata like <code>used_cached_parser</code>.</li>
         </ul>
-    </div>
-
-    <!-- Slide 16: Testing & Quality -->
-    <div class="slide">
-        <h2>Testing & Quality</h2>
-        <ul>
-            <li><strong>Pytest suite:</strong> unit + integration + contract/snapshot + workflow tests.</li>
-            <li><strong>API contract:</strong> OpenAPI endpoints documented and tested for stability.</li>
-            <li><strong>Coverage:</strong> overall <span class="highlight">78%</span> (see <code>coverage_report.txt</code>).</li>
-        </ul>
+        <p><span class="label">TECH:</span> Pytest, pytest-cov.</p>
         <pre>
 Coverage summary (pytest-cov):
 TOTAL  4168 statements, 926 missed  →  78% covered
         </pre>
+    </div>
+
+    <!-- Slide 16: Criterion 6 — Containerization -->
+    <div class="slide criteria">
+        <h2>Criterion: Containerization</h2>
+        <p><span class="label">WHY:</span> Reproducible environment for multi-service runtime (DB/Redis/workers) and a
+            predictable demo setup.</p>
+        <p><span class="label">WHAT:</span></p>
+        <ul>
+            <li>Each service runs in its own container (API, headless worker, AI worker, scheduler).</li>
+            <li>Compose orchestrates dependencies, environment variables, and health checks.</li>
+            <li>Isolation for Playwright runtime and consistent execution across machines.</li>
+        </ul>
+        <p><span class="label">TECH:</span> Docker, Docker Compose.</p>
+        <pre>
+docker compose up -d
+docker compose ps
+docker compose logs -f api
+        </pre>
+    </div>
+
+    <!-- Slide 16A: Appendix — Docker Compose Services -->
+    <div class="slide criteria">
+        <h2>Appendix: Docker Compose Services</h2>
+        <pre>
+services:
+  postgres: postgres:15-alpine (healthcheck)
+  redis:    redis:7-alpine     (healthcheck)
+  api:      FastAPI (8000)
+  headless_worker: Celery -Q fetching_queue (Playwright)
+  ai_worker:       Celery -Q ai_queue (LLM + parsing)
+  scheduler:       Celery Beat
+        </pre>
+    </div>
+
+    <!-- Slide 17: Criterion 7 — API documentation -->
+    <div class="slide criteria">
+        <h2>Criterion: API documentation</h2>
+        <p><span class="label">WHY:</span> A stable API contract and interactive UI speeds up integration and demo
+            walkthroughs.</p>
+        <p><span class="label">WHAT:</span></p>
+        <ul>
+            <li>OpenAPI schema generated automatically from FastAPI routes and models.</li>
+            <li>Swagger UI supports auth + end-to-end calls (process → status → result).</li>
+            <li>Examples embedded in docs for predictable client integration.</li>
+        </ul>
+        <p><span class="label">TECH:</span> FastAPI OpenAPI + Swagger UI (<code>/docs</code>).</p>
+        <pre>
+GET /docs          # Swagger UI
+GET /openapi.json  # OpenAPI schema
+Authorize: Bearer &lt;token&gt;
+Try it out: /process → /status → /result
+        </pre>
+    </div>
+
+    <!-- Slide 17A: Appendix — Swagger UI -->
+    <div class="slide criteria">
+        <h2>Appendix: Swagger UI Screenshot</h2>
+        <div class="screenshot-frame">
+            <img src="../docs/assets/images/swagger_ui.png" loading="eager" decoding="sync"
+                alt="Swagger UI: OpenAPI documentation for the service" />
+        </div>
     </div>
 
     <!-- Slide 17: Demo Walkthrough -->
@@ -562,16 +682,91 @@ TOTAL  4168 statements, 926 missed  →  78% covered
         </div>
     </div>
 
+    <!-- Slide 20: Challenges & Solutions -->
+    <div class="slide">
+        <h2>Challenges & Solutions</h2>
+        <table>
+            <tr>
+                <th>Problem</th>
+                <th>Solution</th>
+                <th>What I learned</th>
+            </tr>
+            <tr>
+                <td>Dynamic JS pages + layout drift</td>
+                <td>Playwright render + semantic capture + validated parser cache</td>
+                <td>Make extraction robust by separating “understanding” from “parsing”</td>
+            </tr>
+            <tr>
+                <td>Prompt injection / unsafe instructions</td>
+                <td>Input sanitization + defense-in-depth prompts + strict pipeline</td>
+                <td>Security must be built into the workflow, not added later</td>
+            </tr>
+            <tr>
+                <td>Cached parser becomes stale</td>
+                <td>Self-healing: invalidate on failure and regenerate with validation</td>
+                <td>Monitoring + feedback loops keep automation reliable</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Slide 21: Results -->
+    <div class="slide">
+        <h2>Results</h2>
+        <table>
+            <tr>
+                <th>Capability</th>
+                <th>Status</th>
+            </tr>
+            <tr>
+                <td>Async task API (process → status → result)</td>
+                <td>✓</td>
+            </tr>
+            <tr>
+                <td>Playwright rendering + semantic text capture</td>
+                <td>✓</td>
+            </tr>
+            <tr>
+                <td>LLM intent extraction + schema extraction</td>
+                <td>✓</td>
+            </tr>
+            <tr>
+                <td>Validated parser cache + self-healing</td>
+                <td>✓</td>
+            </tr>
+            <tr>
+                <td>User-owned scheduling (cron jobs)</td>
+                <td>✓</td>
+            </tr>
+            <tr>
+                <td>Testing coverage ≥ 70%</td>
+                <td>✓ (78%)</td>
+            </tr>
+        </table>
+        <ul>
+            <li><strong>Deployment:</strong> N/A (local demo via Docker Compose)</li>
+            <li><strong>Backlog:</strong> UI dashboard, multi-URL crawling, stronger anti-bot strategies</li>
+        </ul>
+    </div>
+
     <!-- Slide 18: Conclusion -->
     <div class="slide">
         <div class="center">
             <h1>Thank You</h1>
             <h2>Q & A</h2>
-            <p style="font-size: 28px; margin-top: 30px;">
-                Docs: <code>docs_old/ARCHITECTURE.md</code>, <code>docs_old/USER_GUIDE.md</code>
+            <p style="font-size: 26px; margin-top: 24px;">
+                <strong>Production URL:</strong> N/A (not deployed; demo runs locally)
             </p>
-            <p style="font-size: 28px;">
-                API: <code>http://localhost:8000/docs</code>
+            <p style="font-size: 26px;">
+                <strong>Repository:</strong> N/A (private/local) — archive: <code>Marchan_Yan_Diploma_upd.zip</code>
+            </p>
+            <p style="font-size: 26px;">
+                <strong>API Docs (Swagger):</strong> <code>http://localhost:8000/docs</code>
+            </p>
+            <p style="font-size: 26px;">
+                <strong>Project docs:</strong> <code>docs_old/ARCHITECTURE.md</code>, <code>docs_old/USER_GUIDE.md</code>
+            </p>
+            <p style="font-size: 26px;">
+                <strong>Design:</strong> N/A
             </p>
         </div>
     </div>
