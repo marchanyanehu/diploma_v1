@@ -16,6 +16,8 @@ const state = {
     token: localStorage.getItem(CONFIG.TOKEN_KEY) || null,
     username: localStorage.getItem(CONFIG.USERNAME_KEY) || null,
     currentTaskId: null,
+    currentResult: null,
+    currentResultTarget: 'latest',
     pollTimer: null,
     tasks: [],
     scheduledJobs: []
@@ -51,6 +53,9 @@ const elements = {
     // Tasks
     tasksList: document.getElementById('tasks-list'),
     refreshTasks: document.getElementById('refresh-tasks'),
+    taskResultPreview: document.getElementById('task-result-preview'),
+    previewResultStatus: document.getElementById('preview-result-status'),
+    previewResultContent: document.getElementById('preview-result-content'),
     
     // Schedule
     scheduleForm: document.getElementById('schedule-form'),
@@ -211,6 +216,15 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function formatCellValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') {
+        // For objects/arrays, show compact JSON
+        return JSON.stringify(value);
+    }
+    return String(value);
+}
+
 function formatDate(dateString) {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
@@ -306,15 +320,15 @@ function renderTasks() {
     const tasksHtml = state.tasks.map(task => `
         <div class="task-item" data-task-id="${task.task_id}">
             <div class="task-info">
-                <div class="task-url">${escapeHtml(truncateUrl(task.url || 'N/A', 60))}</div>
-                <div class="task-prompt">${escapeHtml(task.prompt || task.message || '')}</div>
+                <div class="task-id">Task: ${escapeHtml(task.task_id.substring(0, 8))}...</div>
+                <div class="task-prompt">${escapeHtml(task.message || 'Processing...')}</div>
                 <div class="task-meta">
                     <span>Created: ${formatDate(task.created_at)}</span>
                     <span class="status-badge status-${task.status.toLowerCase().replace('_', '-')}">${task.status}</span>
                 </div>
             </div>
             <div class="task-actions">
-                ${task.status === 'SUCCESS' ? `<button class="btn-view" onclick="viewTaskResult('${task.task_id}')">View Result</button>` : ''}
+                ${task.status === 'SUCCESS' ? `<button class="btn-view" onclick="viewTaskResult('${task.task_id}')">View</button><button class="btn-raw" onclick="viewTaskRaw('${task.task_id}')">Raw</button>` : ''}
             </div>
         </div>
     `).join('');
@@ -326,8 +340,7 @@ async function viewTaskResult(taskId) {
     showLoading();
     try {
         const result = await api.getTaskResult(taskId);
-        displayResult(result);
-        switchTab('scrape');
+        displayResult(result, false, 'preview');
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -335,45 +348,106 @@ async function viewTaskResult(taskId) {
     }
 }
 
-function displayResult(result) {
-    elements.latestResult.classList.remove('hidden');
+async function viewTaskRaw(taskId) {
+    showLoading();
+    try {
+        const result = await api.getTaskResult(taskId);
+        displayResult(result, true, 'preview');
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function displayResult(result, showRaw = false, target = 'latest') {
+    // Store current result for toggle
+    state.currentResult = result;
+    state.currentResultTarget = target;
+    
+    // Determine which container to use
+    let container, statusEl, contentEl;
+    if (target === 'preview') {
+        container = elements.taskResultPreview;
+        statusEl = elements.previewResultStatus;
+        contentEl = elements.previewResultContent;
+    } else {
+        container = elements.latestResult;
+        statusEl = elements.resultStatus;
+        contentEl = elements.resultContent;
+    }
+    
+    container.classList.remove('hidden');
     
     const statusClass = `status-${result.status.toLowerCase().replace('_', '-')}`;
-    elements.resultStatus.className = `status-badge ${statusClass}`;
-    elements.resultStatus.textContent = result.status;
+    statusEl.className = `status-badge ${statusClass}`;
+    statusEl.textContent = result.status;
     
     let dataHtml = '';
     
-    if (result.data && result.data.length > 0) {
-        // Check if data is an array of objects with consistent keys
+    if (showRaw) {
+        // Raw JSON view
+        dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+    } else if (result.data && result.data.length > 0) {
+        // Check if data has 'fields' property with extracted values
         const firstItem = result.data[0];
         if (typeof firstItem === 'object' && !Array.isArray(firstItem)) {
-            const keys = Object.keys(firstItem);
-            if (keys.length > 0 && keys.length <= 5) {
-                // Render as table
-                dataHtml = `
-                    <table class="result-table">
-                        <thead>
-                            <tr>
-                                ${keys.map(key => `<th>${escapeHtml(key)}</th>`).join('')}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${result.data.slice(0, 50).map(item => `
+            // Check if items have a 'fields' object with the actual extracted data
+            if (firstItem.fields && typeof firstItem.fields === 'object') {
+                const fieldKeys = Object.keys(firstItem.fields);
+                if (fieldKeys.length > 0 && fieldKeys.length <= 8) {
+                    // Render table with field keys as headers
+                    dataHtml = `
+                        <table class="result-table">
+                            <thead>
                                 <tr>
-                                    ${keys.map(key => `<td>${escapeHtml(String(item[key] ?? ''))}</td>`).join('')}
+                                    ${fieldKeys.map(key => `<th>${escapeHtml(key)}</th>`).join('')}
                                 </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                    ${result.data.length > 50 ? `<p style="margin-top:1rem;color:var(--text-muted);font-size:0.875rem;">Showing first 50 of ${result.data.length} results</p>` : ''}
-                `;
+                            </thead>
+                            <tbody>
+                                ${result.data.slice(0, 50).map(item => `
+                                    <tr>
+                                        ${fieldKeys.map(key => `<td>${escapeHtml(formatCellValue(item.fields ? item.fields[key] : ''))}</td>`).join('')}
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ${result.data.length > 50 ? `<p style="margin-top:1rem;color:var(--text-muted);font-size:0.875rem;">Showing first 50 of ${result.data.length} results</p>` : ''}
+                    `;
+                } else {
+                    dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result.data, null, 2))}</pre>`;
+                }
             } else {
-                // Too many columns, show as JSON
-                dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result.data, null, 2))}</pre>`;
+                // No 'fields' property, use simple keys directly
+                const allKeys = Object.keys(firstItem);
+                const simpleKeys = allKeys.filter(key => {
+                    const val = firstItem[key];
+                    return val === null || val === undefined || typeof val !== 'object';
+                });
+                
+                if (simpleKeys.length > 0 && simpleKeys.length <= 8) {
+                    dataHtml = `
+                        <table class="result-table">
+                            <thead>
+                                <tr>
+                                    ${simpleKeys.map(key => `<th>${escapeHtml(key)}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${result.data.slice(0, 50).map(item => `
+                                    <tr>
+                                        ${simpleKeys.map(key => `<td>${escapeHtml(formatCellValue(item[key]))}</td>`).join('')}
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ${result.data.length > 50 ? `<p style="margin-top:1rem;color:var(--text-muted);font-size:0.875rem;">Showing first 50 of ${result.data.length} results</p>` : ''}
+                    `;
+                } else {
+                    dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result.data, null, 2))}</pre>`;
+                }
             }
         } else {
-            // Array of primitives or nested arrays
             dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result.data, null, 2))}</pre>`;
         }
     } else {
@@ -382,13 +456,24 @@ function displayResult(result) {
     
     const metaHtml = `
         <div class="result-meta">
-            <span><strong>URL:</strong> ${escapeHtml(truncateUrl(result.url || 'N/A', 40))}</span>
+            <span><strong>URL:</strong> <a href="${escapeHtml(result.url || '')}" target="_blank" class="result-url">${escapeHtml(truncateUrl(result.url || 'N/A', 50))}</a></span>
             ${result.processing_time ? `<span><strong>Time:</strong> ${result.processing_time.toFixed(2)}s</span>` : ''}
             <span><strong>Items:</strong> ${result.data ? result.data.length : 0}</span>
+            <button class="btn-toggle-view" onclick="toggleResultView()">${showRaw ? '📊 Table' : '📄 Raw JSON'}</button>
         </div>
     `;
     
-    elements.resultContent.innerHTML = dataHtml + metaHtml;
+    contentEl.innerHTML = dataHtml + metaHtml;
+}
+
+function toggleResultView() {
+    if (state.currentResult) {
+        const target = state.currentResultTarget || 'latest';
+        const contentEl = target === 'preview' ? elements.previewResultContent : elements.resultContent;
+        const isCurrentlyRaw = contentEl.querySelector('.result-data') && 
+                               contentEl.querySelector('.result-data').textContent.startsWith('{');
+        displayResult(state.currentResult, !isCurrentlyRaw, target);
+    }
 }
 
 async function pollTaskStatus(taskId) {
@@ -666,7 +751,9 @@ function setupEventListeners() {
 
 // Make functions available globally for inline handlers
 window.viewTaskResult = viewTaskResult;
+window.viewTaskRaw = viewTaskRaw;
 window.deleteScheduledJob = deleteScheduledJob;
+window.toggleResultView = toggleResultView;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
