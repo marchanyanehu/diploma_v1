@@ -112,6 +112,65 @@
             font-family: Consolas, 'Courier New', monospace;
             font-size: 22px;
         }
+
+        /* Demo screenshot placeholders (replace with real screenshots before export) */
+        .demo-layout {
+            display: flex;
+            gap: 30px;
+            flex: 1;
+            align-items: stretch;
+            margin-top: 20px;
+        }
+
+        .screenshot-placeholder {
+            flex: 1 1 auto;
+            border: 3px dashed #3498db;
+            border-radius: 16px;
+            background: #f8fbff;
+            color: #2980b9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+            font-size: 28px;
+            font-weight: 700;
+            min-height: 420px;
+            box-sizing: border-box;
+        }
+
+        .screenshot-placeholder .sub {
+            margin-top: 12px;
+            font-size: 22px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .callouts {
+            flex: 0 0 420px;
+            border-left: 4px solid #ecf0f1;
+            padding-left: 24px;
+            box-sizing: border-box;
+        }
+
+        .callouts ul {
+            font-size: 24px;
+            line-height: 1.5;
+            margin-top: 0;
+        }
+
+        .two-up {
+            display: flex;
+            gap: 20px;
+            flex: 1 1 auto;
+            align-items: stretch;
+        }
+
+        .screenshot-placeholder.small {
+            font-size: 24px;
+            min-height: 420px;
+        }
     </style>
 </head>
 
@@ -384,21 +443,62 @@ TOTAL  4168 statements, 926 missed  →  78% covered
 
     <!-- Slide 17: Demo Walkthrough -->
     <div class="slide">
-        <h2>Demo Walkthrough</h2>
-        <ul>
-            <li><strong>Demo 1 — Single extraction:</strong> create task → poll status → fetch result JSON.</li>
-            <li><strong>Demo 2 — Scheduling:</strong> create cron job → scheduler enqueues tasks → show historical
-                results.</li>
-        </ul>
-        <pre>
-GET /api/v1/result/{task_id}
-{
-  "task_id": "...",
-  "status": "SUCCESS",
-  "data": [ { "fields": { "title": "...", "price": "..." } } ],
-  "metadata": { "used_cached_parser": true, "total_matches": 12 }
-}
-        </pre>
+        <h2>Demo Screenshots (1/3) — Authentication</h2>
+        <div class="demo-layout">
+            <div class="screenshot-placeholder">
+                Screenshot placeholder
+                <div class="sub">Registration / Login screen (real UI)</div>
+            </div>
+            <div class="callouts">
+                <ul>
+                    <li><strong>Flow:</strong> register → login → get JWT token</li>
+                    <li><strong>Show:</strong> Swagger “Authorize” with Bearer token</li>
+                    <li><strong>Optional:</strong> invalid login error state</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slide 18: Demo Screenshot 2 -->
+    <div class="slide">
+        <h2>Demo Screenshots (2/3) — Create Task</h2>
+        <div class="demo-layout">
+            <div class="screenshot-placeholder">
+                Screenshot placeholder
+                <div class="sub">POST <code>/api/v1/process</code> (Swagger UI request)</div>
+            </div>
+            <div class="callouts">
+                <ul>
+                    <li><strong>Input:</strong> URL + natural language prompt</li>
+                    <li><strong>Response:</strong> 202 Accepted + <code>task_id</code></li>
+                    <li><strong>Next:</strong> poll <code>/api/v1/status/{task_id}</code></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slide 19: Demo Screenshot 3 -->
+    <div class="slide">
+        <h2>Demo Screenshots (3/3) — Result & History</h2>
+        <div class="demo-layout">
+            <div class="two-up">
+                <div class="screenshot-placeholder small">
+                    Screenshot placeholder
+                    <div class="sub">GET <code>/api/v1/result/{task_id}</code> (JSON response)</div>
+                </div>
+                <div class="screenshot-placeholder small">
+                    Screenshot placeholder
+                    <div class="sub">Scheduling / task history view (real UI or Swagger)</div>
+                </div>
+            </div>
+            <div class="callouts">
+                <ul>
+                    <li><strong>Highlight:</strong> extracted fields (e.g., <code>title</code>, <code>price</code>)</li>
+                    <li><strong>Metadata:</strong> cache hit + match count</li>
+                    <li><strong>Optional:</strong> show repeated run faster on cache hit</li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     <!-- Slide 18: Conclusion -->
