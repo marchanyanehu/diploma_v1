@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent Web Data Aggregator</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%236366f1'/%3E%3Cpath d='M12 20L18 26L28 14' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Auth Section -->
+        <div id="auth-section" class="auth-container">
+            <div class="auth-card">
+                <div class="auth-header">
+                    <div class="logo">
+                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="40" height="40" rx="8" fill="url(#gradient)"/>
+                            <path d="M12 20L18 26L28 14" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                            <defs>
+                                <linearGradient id="gradient" x1="0" y1="0" x2="40" y2="40">
+                                    <stop stop-color="#6366f1"/>
+                                    <stop offset="1" stop-color="#8b5cf6"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                    </div>
+                    <h1>Web Data Aggregator</h1>
+                    <p class="subtitle">Extract structured data using natural language</p>
+                </div>
+
+                <!-- Login Form -->
+                <form id="login-form" class="auth-form">
+                    <h2>Sign In</h2>
+                    <div class="form-group">
+                        <label for="login-username">Username</label>
+                        <input type="text" id="login-username" placeholder="Enter your username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" placeholder="Enter your password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+                    <p class="auth-switch">Don't have an account? <a href="#" id="show-register">Create one</a></p>
+                </form>
+
+                <!-- Register Form -->
+                <form id="register-form" class="auth-form hidden">
+                    <h2>Create Account</h2>
+                    <div class="form-group">
+                        <label for="register-username">Username</label>
+                        <input type="text" id="register-username" placeholder="Choose a username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">Email (optional)</label>
+                        <input type="email" id="register-email" placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Password</label>
+                        <input type="password" id="register-password" placeholder="Create a password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+                    <p class="auth-switch">Already have an account? <a href="#" id="show-login">Sign in</a></p>
+                </form>
+
+                <div id="auth-error" class="error-message hidden"></div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div id="dashboard-section" class="hidden">
+            <!-- Navigation -->
+            <nav class="navbar">
+                <div class="nav-brand">
+                    <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="40" height="40" rx="8" fill="url(#gradient2)"/>
+                        <path d="M12 20L18 26L28 14" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <defs>
+                            <linearGradient id="gradient2" x1="0" y1="0" x2="40" y2="40">
+                                <stop stop-color="#6366f1"/>
+                                <stop offset="1" stop-color="#8b5cf6"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <span>Web Data Aggregator</span>
+                </div>
+                <div class="nav-user">
+                    <span id="username-display"></span>
+                    <button id="logout-btn" class="btn btn-ghost">Sign Out</button>
+                </div>
+            </nav>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab active" data-tab="scrape">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="M21 21l-4.35-4.35"></path>
+                        </svg>
+                        New Scrape
+                    </button>
+                    <button class="tab" data-tab="tasks">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"></path>
+                            <rect x="9" y="3" width="6" height="4" rx="1"></rect>
+                            <path d="M9 12h6"></path>
+                            <path d="M9 16h6"></path>
+                        </svg>
+                        Task History
+                    </button>
+                    <button class="tab" data-tab="schedule">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        Scheduled Jobs
+                    </button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="tab-content">
+                    <!-- Scrape Tab -->
+                    <div id="scrape-tab" class="tab-pane active">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>Create Scraping Task</h2>
+                                <p>Enter a URL and describe what data you want to extract</p>
+                            </div>
+                            <form id="scrape-form" class="scrape-form">
+                                <div class="form-group">
+                                    <label for="scrape-url">Website URL</label>
+                                    <input type="url" id="scrape-url" placeholder="https://example.com/products" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="scrape-prompt">What do you want to extract?</label>
+                                    <textarea id="scrape-prompt" rows="3" placeholder="e.g., Extract all product names and prices from the page" required minlength="5" maxlength="1000"></textarea>
+                                    <span class="char-count"><span id="prompt-length">0</span>/1000</span>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                                    </svg>
+                                    Start Extraction
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Example Prompts -->
+                        <div class="card examples-card">
+                            <h3>Example Prompts</h3>
+                            <div class="examples-grid">
+                                <button class="example-btn" data-prompt="Extract all product names and prices">
+                                    🛒 Product prices
+                                </button>
+                                <button class="example-btn" data-prompt="Get job titles, company names, and locations for all job postings">
+                                    💼 Job listings
+                                </button>
+                                <button class="example-btn" data-prompt="Find all article headlines with publication dates">
+                                    📰 News headlines
+                                </button>
+                                <button class="example-btn" data-prompt="Extract event names, dates, and venues">
+                                    📅 Event details
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Latest Task Result -->
+                        <div id="latest-result" class="card hidden">
+                            <div class="card-header">
+                                <h3>Latest Result</h3>
+                                <span id="result-status" class="status-badge"></span>
+                            </div>
+                            <div id="result-content"></div>
+                        </div>
+                    </div>
+
+                    <!-- Tasks Tab -->
+                    <div id="tasks-tab" class="tab-pane hidden">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>Task History</h2>
+                                <button id="refresh-tasks" class="btn btn-ghost">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="23 4 23 10 17 10"></polyline>
+                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                    </svg>
+                                    Refresh
+                                </button>
+                            </div>
+                            <div id="tasks-list" class="tasks-list">
+                                <div class="empty-state">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"></path>
+                                        <rect x="9" y="3" width="6" height="4" rx="1"></rect>
+                                    </svg>
+                                    <p>No tasks yet. Create your first scraping task!</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Schedule Tab -->
+                    <div id="schedule-tab" class="tab-pane hidden">
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>Scheduled Jobs</h2>
+                                <button id="show-schedule-form" class="btn btn-primary btn-sm">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    </svg>
+                                    New Schedule
+                                </button>
+                            </div>
+
+                            <!-- Schedule Form -->
+                            <form id="schedule-form" class="schedule-form hidden">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="schedule-url">URL</label>
+                                        <input type="url" id="schedule-url" placeholder="https://example.com" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="schedule-cron">Cron Expression</label>
+                                        <input type="text" id="schedule-cron" placeholder="0 9 * * *" required>
+                                        <span class="hint">e.g., "0 9 * * *" = daily at 9 AM</span>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="schedule-prompt">Extraction Prompt</label>
+                                    <textarea id="schedule-prompt" rows="2" placeholder="What to extract..." required></textarea>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="button" id="cancel-schedule" class="btn btn-ghost">Cancel</button>
+                                    <button type="submit" class="btn btn-primary">Create Schedule</button>
+                                </div>
+                            </form>
+
+                            <div id="schedules-list" class="schedules-list">
+                                <div class="empty-state">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <polyline points="12 6 12 12 16 14"></polyline>
+                                    </svg>
+                                    <p>No scheduled jobs. Create one to automate your scraping!</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cron Helper -->
+                        <div class="card">
+                            <h3>Common Schedules</h3>
+                            <div class="cron-examples">
+                                <button class="cron-btn" data-cron="0 * * * *">Every hour</button>
+                                <button class="cron-btn" data-cron="0 9 * * *">Daily at 9 AM</button>
+                                <button class="cron-btn" data-cron="0 9 * * 1">Weekly (Mon 9 AM)</button>
+                                <button class="cron-btn" data-cron="0 0 1 * *">Monthly (1st)</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container"></div>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
