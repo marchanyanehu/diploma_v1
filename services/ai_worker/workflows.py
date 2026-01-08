@@ -224,22 +224,23 @@ def run_schema_extraction(
         extracted_data = deduped
         log_event(task_id, "schema_extraction_success", count=len(extracted_data))
         
-        # 3. Generate and Cache Parser
+        # 3. Generate and Cache Parser (non-blocking - spawn thread so results return immediately)
         if db and domain and extracted_data:
             logger.info(f"Attempting to cache parser for domain={domain}, fields={schema_fields}, items={len(extracted_data)}")
-            try:
-                # Use raw HTML or inner text depending on what's available
-                raw_source = html_content if html_content else inner_text
-                
-                # IMPORTANT: If existing cache logic used 'SEMANTIC' for regex, we should consider that too.
-                # But here we want to establish NEW parser types. 
-                
-                _cache_parser_from_extraction(
-                    db, task_id, domain, schema_fields, 
-                    raw_source, extracted_data, llm, url_pattern=url_pattern
-                )
-            except Exception as e:
-                logger.warning(f"Failed to cache parser: {e}")
+            
+            import threading
+            def background_cache():
+                try:
+                    raw_source = html_content if html_content else inner_text
+                    _cache_parser_from_extraction(
+                        db, task_id, domain, schema_fields, 
+                        raw_source, extracted_data, llm, url_pattern=url_pattern
+                    )
+                except Exception as e:
+                    logger.warning(f"Background parser caching failed: {e}")
+            
+            cache_thread = threading.Thread(target=background_cache, daemon=True)
+            cache_thread.start()
         else:
             logger.warning(f"Caching skipped: db={bool(db)}, domain={domain}, extracted_data_len={len(extracted_data)}")
         
@@ -358,8 +359,8 @@ def _cache_parser_from_extraction(
     url_pattern: Optional[str] = None
 ) -> None:
     """Generate parser (CSS/Regex/JSON) from successful extraction and cache it."""
-    if len(extracted_items) < 2:
-        log_event(task_id, "parser_cache_skip", reason="too_few_items")
+    if not extracted_items:
+        log_event(task_id, "parser_cache_skip", reason="no_items")
         return
     
     examples = []
@@ -369,8 +370,8 @@ def _cache_parser_from_extraction(
             continue
         examples.append(field_vals)
     
-    if len(examples) < 2:
-        log_event(task_id, "parser_cache_skip", reason="insufficient_examples")
+    if not examples:
+        log_event(task_id, "parser_cache_skip", reason="no_valid_examples")
         return
     
     target_desc = f"Extract fields: {', '.join(fields)}"
