@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <title>Marchan — Diploma Project Presentation</title>
     <style>
         body {
             margin: 0;
@@ -122,12 +123,35 @@
             margin-top: 20px;
         }
 
+        /* Demo screenshots (real images) */
+        .screenshot-frame {
+            flex: 1 1 auto;
+            border: 2px solid #e1e4e8;
+            border-radius: 16px;
+            background: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            min-height: 420px;
+            padding: 8px;
+        }
+
+        .screenshot-frame img {
+            background: #f8fbff;
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+        }
+
         .screenshot-placeholder {
             flex: 1 1 auto;
             border: 3px dashed #3498db;
             border-radius: 16px;
             background: #f8fbff;
-            color: #2980b9;
+            color: #1f4e79;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -363,6 +387,34 @@ POST /api/v1/process
         </ul>
     </div>
 
+    <!-- Slide 12: Cache Hit Check -->
+    <div class="slide">
+        <h2>Cache Hit Check (Same URL + Intent)</h2>
+        <ul>
+            <li><strong>Intent normalization:</strong> prompt → intent → normalized fields (<code>schema_fields</code> /
+                <code>keywords</code>).</li>
+            <li><strong>Lookup key:</strong> <code>(domain, full_url, fields, source_type)</code> (exact URL match).</li>
+            <li><strong>First run:</strong> Headless Worker always captures <code>semantic_text</code> and stores it as
+                task <code>page_content</code> for traceability.</li>
+            <li><strong>Cache hit:</strong> apply cached parser locally → skip LLM generation → <code>used_cached_parser=true</code>.</li>
+            <li><strong>Cache miss:</strong> run LLM extraction → generate + validate parser → cache it for next time.</li>
+        </ul>
+        <pre>
+fields = normalize(intent.schema_fields or intent.keywords)
+key    = (domain, full_url, fields)
+
+if cache.has(key, source="SEMANTIC"):
+    data = run_parser(cache[key], semantic_text)
+elif cache.has(key, source="CSS/HTML"):
+    data = run_parser(cache[key], html)
+else:
+    data = llm_extract(semantic_text/html)
+    cache.store(key, validated_parser)
+
+return { data, metadata: { used_cached_parser } }
+        </pre>
+    </div>
+
     <!-- Slide 12: Scheduling -->
     <div class="slide">
         <h2>Scheduling</h2>
@@ -445,9 +497,16 @@ TOTAL  4168 statements, 926 missed  →  78% covered
     <div class="slide">
         <h2>Demo Screenshots (1/3) — Authentication</h2>
         <div class="demo-layout">
-            <div class="screenshot-placeholder">
-                Screenshot placeholder
-                <div class="sub">Registration / Login screen (real UI)</div>
+            <div class="two-up">
+                <div class="screenshot-frame">
+                    <img src="../docs/assets/images/presentation_imgs/swagger_registration.png" loading="eager"
+                        decoding="sync"
+                        alt="Swagger UI: POST /auth/register request and response" />
+                </div>
+                <div class="screenshot-frame">
+                    <img src="../docs/assets/images/presentation_imgs/swagger_auth.png" loading="eager" decoding="sync"
+                        alt="Swagger UI: Authorize (OAuth2PasswordBearer) with username/password" />
+                </div>
             </div>
             <div class="callouts">
                 <ul>
@@ -461,17 +520,24 @@ TOTAL  4168 statements, 926 missed  →  78% covered
 
     <!-- Slide 18: Demo Screenshot 2 -->
     <div class="slide">
-        <h2>Demo Screenshots (2/3) — Create Task</h2>
+        <h2>Demo Screenshots (2/3) — Create Task & Poll Status</h2>
         <div class="demo-layout">
-            <div class="screenshot-placeholder">
-                Screenshot placeholder
-                <div class="sub">POST <code>/api/v1/process</code> (Swagger UI request)</div>
+            <div class="two-up">
+                <div class="screenshot-frame">
+                    <img src="../docs/assets/images/presentation_imgs/swagger_create_task.png" loading="eager"
+                        decoding="sync" alt="Swagger UI: POST /api/v1/process request and response with task_id" />
+                </div>
+                <div class="screenshot-frame">
+                    <img src="../docs/assets/images/presentation_imgs/swagger_check_status.png" loading="eager"
+                        decoding="sync" alt="Swagger UI: GET /api/v1/status/{task_id} response (IN_PROGRESS)" />
+                </div>
             </div>
             <div class="callouts">
                 <ul>
                     <li><strong>Input:</strong> URL + natural language prompt</li>
                     <li><strong>Response:</strong> 202 Accepted + <code>task_id</code></li>
-                    <li><strong>Next:</strong> poll <code>/api/v1/status/{task_id}</code></li>
+                    <li><strong>Status gathering:</strong> poll <code>/api/v1/status/{task_id}</code> until
+                        <code>SUCCESS</code></li>
                 </ul>
             </div>
         </div>
@@ -479,23 +545,18 @@ TOTAL  4168 statements, 926 missed  →  78% covered
 
     <!-- Slide 19: Demo Screenshot 3 -->
     <div class="slide">
-        <h2>Demo Screenshots (3/3) — Result & History</h2>
+        <h2>Demo Screenshots (3/3) — Fetch Result</h2>
         <div class="demo-layout">
-            <div class="two-up">
-                <div class="screenshot-placeholder small">
-                    Screenshot placeholder
-                    <div class="sub">GET <code>/api/v1/result/{task_id}</code> (JSON response)</div>
-                </div>
-                <div class="screenshot-placeholder small">
-                    Screenshot placeholder
-                    <div class="sub">Scheduling / task history view (real UI or Swagger)</div>
-                </div>
+            <div class="screenshot-frame">
+                <img src="../docs/assets/images/presentation_imgs/swagger_task_result.png" loading="eager"
+                    decoding="sync" alt="Swagger UI: GET /api/v1/result/{task_id} response with extracted JSON" />
             </div>
             <div class="callouts">
                 <ul>
-                    <li><strong>Highlight:</strong> extracted fields (e.g., <code>title</code>, <code>price</code>)</li>
-                    <li><strong>Metadata:</strong> cache hit + match count</li>
-                    <li><strong>Optional:</strong> show repeated run faster on cache hit</li>
+                    <li><strong>When ready:</strong> <code>GET /api/v1/result/{task_id}</code></li>
+                    <li><strong>Data:</strong> structured items with <code>fields</code> (e.g., name/price/link)</li>
+                    <li><strong>Metadata:</strong> <code>total_matches</code> +
+                        <code>used_cached_parser</code></li>
                 </ul>
             </div>
         </div>
