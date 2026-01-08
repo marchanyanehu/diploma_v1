@@ -168,10 +168,13 @@ def run_schema_extraction(
     )
     
     try:
-        response = llm.chat([
-            {"role": "system", "content": SCHEMA_EXTRACTION_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ])
+        response = llm.chat(
+            [
+                {"role": "system", "content": SCHEMA_EXTRACTION_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=16384
+        )
         
         log_event(task_id, "schema_llm_raw_response", response=response[:500])
         

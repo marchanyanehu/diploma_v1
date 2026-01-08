@@ -120,7 +120,7 @@ Create a regex to capture content matching the expected text from visible HTML e
 # Schema Extraction (Specific to tasks.py _run_schema_extraction_with_cache)
 # ---------------------------------------------------------------------------
 
-SCHEMA_EXTRACTION_SYSTEM_PROMPT = """You are a precise data extraction assistant. Your task is to find and extract ALL matching records from web content. Output ONLY valid JSON."""
+SCHEMA_EXTRACTION_SYSTEM_PROMPT = """You are a precise data extraction assistant. Your task is to find and extract ALL matching records from web content. Output ONLY valid JSON. NEVER truncate or summarize field values."""
 
 SCHEMA_EXTRACTION_USER_TEMPLATE = """Extract all records from this listing page with these fields: {fields_list}
 
@@ -131,10 +131,11 @@ CRITICAL INSTRUCTIONS:
 1. This is a LISTING PAGE. Find EVERY SINGLE item that contain the requested fields.
 2. Look for repeating structures (cards, list items, table rows).
 3. Aim to extract ALL items you can find (there are usually multiple).
-4. Extract exact text values as they appear in the content.
+4. Extract exact text values as they appear in the content - COMPLETE and UNTRUNCATED.
 5. Field names must match EXACTLY: {fields_list}.
 6. For URLs: Capture the full absolute URL.
 7. Focus on the primary data listing in the center of the page.
+8. For ANY text field, extract the COMPLETE content. NEVER truncate, abbreviate, or summarize.
 
 Output format - JSON with "items" array:
 {{"items": [
