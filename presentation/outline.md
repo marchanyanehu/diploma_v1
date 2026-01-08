@@ -1,31 +1,24 @@
-# Presentation Outline (18-24 Slides)
+# Presentation Outline (18 Slides)
 
-## Structure
-- **Title Slide** (1 slide)
-- **Problem & Goals** (2-3 slides)
-- **Solution Overview / Architecture** (2-3 slides)
-- **Technical Implementation** (7 slides - 1 per criterion)
-- **Demo / Screenshots** (2-3 slides)
-- **Results / Retrospective** (1-2 slides)
-- **Key Takeaways / Questions** (1 slide)
+This outline matches `presentation/slides.html` and focuses on **accurate, defensible** claims from the implemented repo (FastAPI + Celery + Playwright + Postgres/Redis + LLM-assisted extraction with caching/validation).
 
-## Detailed Slide Plan
+## Slide-by-slide plan
 
-1.  **Title Slide**: Project Name, Student Name, Date.
-2.  **Context**: The need for web data extraction in business.
-3.  **Problem**: Manual scraping is brittle; Commercial tools are expensive.
-4.  **Goals**: Build an LLM-powered, resilient, schedule-based extraction API.
-5.  **Solution Architecture**: High-level diagram (FastAPI, Playwright, LLM Agent, Postgres).
-6.  **Criterion 1: Backend (FastAPI)**: Async architecture, Pydantic models.
-7.  **Criterion 2: Scraping (Playwright)**: Headless browser, dynamic content handling.
-8.  **Criterion 3: AI Extraction**: Prompt engineering, CSS selector generation.
-9.  **Criterion 4: Data Storage (Postgres)**: Schema design, JSONB for flexible data.
-10. **Criterion 5: Scheduling (APScheduler)**: Recurring jobs logic.
-11. **Criterion 6: Infrastructure (Docker)**: Containerization, docker-compose.
-12. **Criterion 7: Quality Assurance**: Testing strategy (unit/integration).
-13. **Key Features**: Natural language queries, self-healing selectors.
-14. **Demo Scenarios**: extracting from a news site, scheduling a job.
-15. **Results**: Success rate comparison (Regex vs LLM).
-16. **Challenges & Solutions**: Managing LLM costs, anti-bot detection.
-17. **Retrospective**: What went well, what could be improved.
-18. **Conclusion & Q&A**.
+1. **Title**: Intelligent Web Data Aggregator — Diploma Project (student, supervisor, date).
+2. **Motivation / Problem**: Why web data extraction is hard (dynamic pages, layout changes, manual effort).
+3. **Goal & Scope**: What the system solves + explicit scope boundaries (async API, public pages, no CAPTCHA solving).
+4. **Key Contributions**: Semantic content extraction, dual extraction paths, parser caching + auto-invalidation, security & ops basics.
+5. **Architecture**: Microservices diagram (API, AI worker, headless worker, scheduler, Redis, Postgres, LLM).
+6. **End-to-End Flow**: Request → intent extraction → fetch → extraction → cache → result.
+7. **API Interface**: Auth + main endpoints; example request/response structure.
+8. **Headless Worker (Playwright)**: JS rendering, semantic text + HTML capture, network signal capture, basic stealth.
+9. **Intent & Safety**: LLM intent extraction + field normalization; prompt-injection sanitization.
+10. **Extraction Pipeline**: Schema extraction vs single-field extraction; parser types (regex/CSS/JSONPath) + validation loop.
+11. **Caching Strategy**: Per-domain + full URL + fields; cache hit path; auto-invalidation on failure.
+12. **Scheduling**: Cron jobs per user via `/api/v1/jobs`; Celery Beat enqueues tasks.
+13. **Persistence Model**: Users, scraping tasks, scheduled jobs, parser cache; JSONB intent/results.
+14. **Reliability & Observability**: Correlation IDs, retries/timeouts, health endpoints, logs.
+15. **Security Controls**: JWT auth, rate limiting, safe input handling, secrets via env.
+16. **Testing & Quality**: Test layers; coverage report snapshot (total 78%).
+17. **Demo Walkthrough**: Single extraction + scheduled extraction (what to show during defense).
+18. **Conclusion & Next Steps**: Summary + future work (UI/dashboard, richer navigation, target-site auth, captcha strategy) + Q&A.
