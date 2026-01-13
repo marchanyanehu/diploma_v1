@@ -4,8 +4,9 @@
  */
 
 // Configuration
+// API_BASE_URL can be overridden by setting window.API_BASE_URL before this script loads
 const CONFIG = {
-    API_BASE_URL: 'http://localhost:8000',
+    API_BASE_URL: window.API_BASE_URL || 'http://localhost:8000',
     POLL_INTERVAL: 2000, // ms
     TOKEN_KEY: 'auth_token',
     USERNAME_KEY: 'username'
@@ -35,11 +36,11 @@ const elements = {
     showLogin: document.getElementById('show-login'),
     logoutBtn: document.getElementById('logout-btn'),
     usernameDisplay: document.getElementById('username-display'),
-    
+
     // Tabs
     tabs: document.querySelectorAll('.tab'),
     tabPanes: document.querySelectorAll('.tab-pane'),
-    
+
     // Scrape
     scrapeForm: document.getElementById('scrape-form'),
     scrapeUrl: document.getElementById('scrape-url'),
@@ -49,14 +50,14 @@ const elements = {
     resultStatus: document.getElementById('result-status'),
     resultContent: document.getElementById('result-content'),
     exampleBtns: document.querySelectorAll('.example-btn'),
-    
+
     // Tasks
     tasksList: document.getElementById('tasks-list'),
     refreshTasks: document.getElementById('refresh-tasks'),
     taskResultPreview: document.getElementById('task-result-preview'),
     previewResultStatus: document.getElementById('preview-result-status'),
     previewResultContent: document.getElementById('preview-result-content'),
-    
+
     // Schedule
     scheduleForm: document.getElementById('schedule-form'),
     schedulesList: document.getElementById('schedules-list'),
@@ -66,7 +67,7 @@ const elements = {
     scheduleCron: document.getElementById('schedule-cron'),
     schedulePrompt: document.getElementById('schedule-prompt'),
     cronBtns: document.querySelectorAll('.cron-btn'),
-    
+
     // Utils
     toastContainer: document.getElementById('toast-container'),
     loadingOverlay: document.getElementById('loading-overlay')
@@ -80,28 +81,28 @@ const api = {
             'Content-Type': 'application/json',
             ...options.headers
         };
-        
+
         if (state.token) {
             headers['Authorization'] = `Bearer ${state.token}`;
         }
-        
+
         try {
             const response = await fetch(url, {
                 ...options,
                 headers
             });
-            
+
             if (response.status === 401) {
                 logout();
                 throw new Error('Session expired. Please login again.');
             }
-            
+
             const data = await response.json();
-            
+
             if (!response.ok) {
                 throw new Error(data.detail || data.message || 'Request failed');
             }
-            
+
             return data;
         } catch (error) {
             if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
@@ -110,12 +111,12 @@ const api = {
             throw error;
         }
     },
-    
+
     async login(username, password) {
         const formData = new URLSearchParams();
         formData.append('username', username);
         formData.append('password', password);
-        
+
         const response = await fetch(`${CONFIG.API_BASE_URL}/auth/token`, {
             method: 'POST',
             headers: {
@@ -123,49 +124,49 @@ const api = {
             },
             body: formData
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.detail || 'Login failed');
         }
-        
+
         return data;
     },
-    
+
     async register(username, password, email) {
         return this.request('/auth/register', {
             method: 'POST',
             body: JSON.stringify({ username, password, email: email || null })
         });
     },
-    
+
     async createTask(url, prompt) {
         return this.request('/api/v1/process', {
             method: 'POST',
             body: JSON.stringify({ url, prompt })
         });
     },
-    
+
     async getTaskStatus(taskId) {
         return this.request(`/api/v1/status/${taskId}`);
     },
-    
+
     async getTaskResult(taskId) {
         return this.request(`/api/v1/result/${taskId}`);
     },
-    
+
     async getUserActivity() {
         return this.request('/api/v1/users/me/activity');
     },
-    
+
     async createScheduledJob(url, prompt, scheduleCron) {
         return this.request('/api/v1/jobs', {
             method: 'POST',
             body: JSON.stringify({ url, prompt, schedule_cron: scheduleCron })
         });
     },
-    
+
     async deleteScheduledJob(jobId) {
         return this.request(`/api/v1/jobs/${jobId}`, {
             method: 'DELETE'
@@ -195,7 +196,7 @@ function showToast(message, type = 'info') {
         </button>
     `;
     elements.toastContainer.appendChild(toast);
-    
+
     setTimeout(() => {
         toast.remove();
     }, 5000);
@@ -242,11 +243,11 @@ function login(token, username) {
     state.username = username;
     localStorage.setItem(CONFIG.TOKEN_KEY, token);
     localStorage.setItem(CONFIG.USERNAME_KEY, username);
-    
+
     elements.authSection.classList.add('hidden');
     elements.dashboardSection.classList.remove('hidden');
     elements.usernameDisplay.textContent = username;
-    
+
     loadUserActivity();
 }
 
@@ -255,12 +256,12 @@ function logout() {
     state.username = null;
     localStorage.removeItem(CONFIG.TOKEN_KEY);
     localStorage.removeItem(CONFIG.USERNAME_KEY);
-    
+
     if (state.pollTimer) {
         clearInterval(state.pollTimer);
         state.pollTimer = null;
     }
-    
+
     elements.dashboardSection.classList.add('hidden');
     elements.authSection.classList.remove('hidden');
     elements.loginForm.reset();
@@ -282,7 +283,7 @@ function switchTab(tabName) {
     elements.tabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.tab === tabName);
     });
-    
+
     elements.tabPanes.forEach(pane => {
         pane.classList.toggle('hidden', pane.id !== `${tabName}-tab`);
         pane.classList.toggle('active', pane.id === `${tabName}-tab`);
@@ -316,7 +317,7 @@ function renderTasks() {
         `;
         return;
     }
-    
+
     const tasksHtml = state.tasks.map(task => `
         <div class="task-item" data-task-id="${task.task_id}">
             <div class="task-info">
@@ -332,7 +333,7 @@ function renderTasks() {
             </div>
         </div>
     `).join('');
-    
+
     elements.tasksList.innerHTML = tasksHtml;
 }
 
@@ -364,7 +365,7 @@ function displayResult(result, showRaw = false, target = 'latest') {
     // Store current result for toggle
     state.currentResult = result;
     state.currentResultTarget = target;
-    
+
     // Determine which container to use
     let container, statusEl, contentEl;
     if (target === 'preview') {
@@ -376,15 +377,15 @@ function displayResult(result, showRaw = false, target = 'latest') {
         statusEl = elements.resultStatus;
         contentEl = elements.resultContent;
     }
-    
+
     container.classList.remove('hidden');
-    
+
     const statusClass = `status-${result.status.toLowerCase().replace('_', '-')}`;
     statusEl.className = `status-badge ${statusClass}`;
     statusEl.textContent = result.status;
-    
+
     let dataHtml = '';
-    
+
     if (showRaw) {
         // Raw JSON view
         dataHtml = `<pre class="result-data">${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
@@ -424,7 +425,7 @@ function displayResult(result, showRaw = false, target = 'latest') {
                     const val = firstItem[key];
                     return val === null || val === undefined || typeof val !== 'object';
                 });
-                
+
                 if (simpleKeys.length > 0 && simpleKeys.length <= 8) {
                     dataHtml = `
                         <table class="result-table">
@@ -453,7 +454,7 @@ function displayResult(result, showRaw = false, target = 'latest') {
     } else {
         dataHtml = '<p style="color:var(--text-muted);">No data extracted</p>';
     }
-    
+
     const metaHtml = `
         <div class="result-meta">
             <span><strong>URL:</strong> <a href="${escapeHtml(result.url || '')}" target="_blank" class="result-url">${escapeHtml(truncateUrl(result.url || 'N/A', 50))}</a></span>
@@ -462,7 +463,7 @@ function displayResult(result, showRaw = false, target = 'latest') {
             <button class="btn-toggle-view" onclick="toggleResultView()">${showRaw ? '📊 Table' : '📄 Raw JSON'}</button>
         </div>
     `;
-    
+
     contentEl.innerHTML = dataHtml + metaHtml;
 }
 
@@ -470,8 +471,8 @@ function toggleResultView() {
     if (state.currentResult) {
         const target = state.currentResultTarget || 'latest';
         const contentEl = target === 'preview' ? elements.previewResultContent : elements.resultContent;
-        const isCurrentlyRaw = contentEl.querySelector('.result-data') && 
-                               contentEl.querySelector('.result-data').textContent.startsWith('{');
+        const isCurrentlyRaw = contentEl.querySelector('.result-data') &&
+            contentEl.querySelector('.result-data').textContent.startsWith('{');
         displayResult(state.currentResult, !isCurrentlyRaw, target);
     }
 }
@@ -479,11 +480,11 @@ function toggleResultView() {
 async function pollTaskStatus(taskId) {
     try {
         const status = await api.getTaskStatus(taskId);
-        
+
         if (status.status === 'SUCCESS') {
             clearInterval(state.pollTimer);
             state.pollTimer = null;
-            
+
             const result = await api.getTaskResult(taskId);
             displayResult(result);
             showToast('Extraction completed successfully!', 'success');
@@ -491,7 +492,7 @@ async function pollTaskStatus(taskId) {
         } else if (status.status === 'FAILED') {
             clearInterval(state.pollTimer);
             state.pollTimer = null;
-            
+
             elements.latestResult.classList.remove('hidden');
             elements.resultStatus.className = 'status-badge status-failed';
             elements.resultStatus.textContent = 'FAILED';
@@ -533,7 +534,7 @@ function renderScheduledJobs() {
         `;
         return;
     }
-    
+
     const jobsHtml = state.scheduledJobs.map(job => `
         <div class="schedule-item" data-job-id="${job.id}">
             <div class="schedule-info">
@@ -556,7 +557,7 @@ function renderScheduledJobs() {
             </div>
         </div>
     `).join('');
-    
+
     elements.schedulesList.innerHTML = jobsHtml;
 }
 
@@ -564,7 +565,7 @@ async function deleteScheduledJob(jobId) {
     if (!confirm('Are you sure you want to delete this scheduled job?')) {
         return;
     }
-    
+
     showLoading();
     try {
         await api.deleteScheduledJob(jobId);
@@ -587,23 +588,23 @@ function setupEventListeners() {
         elements.registerForm.classList.remove('hidden');
         hideAuthError();
     });
-    
+
     elements.showLogin.addEventListener('click', (e) => {
         e.preventDefault();
         elements.registerForm.classList.add('hidden');
         elements.loginForm.classList.remove('hidden');
         hideAuthError();
     });
-    
+
     // Login form
     elements.loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideAuthError();
         showLoading();
-        
+
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
-        
+
         try {
             const data = await api.login(username, password);
             login(data.access_token, username);
@@ -614,17 +615,17 @@ function setupEventListeners() {
             hideLoading();
         }
     });
-    
+
     // Register form
     elements.registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         hideAuthError();
         showLoading();
-        
+
         const username = document.getElementById('register-username').value;
         const email = document.getElementById('register-email').value;
         const password = document.getElementById('register-password').value;
-        
+
         try {
             await api.register(username, password, email);
             // Auto-login after registration
@@ -637,36 +638,36 @@ function setupEventListeners() {
             hideLoading();
         }
     });
-    
+
     // Logout
     elements.logoutBtn.addEventListener('click', logout);
-    
+
     // Tab navigation
     elements.tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             switchTab(tab.dataset.tab);
         });
     });
-    
+
     // Scrape form
     elements.scrapeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         showLoading();
-        
+
         const url = elements.scrapeUrl.value;
         const prompt = elements.scrapePrompt.value;
-        
+
         try {
             const response = await api.createTask(url, prompt);
             state.currentTaskId = response.task_id;
-            
+
             showToast('Task created! Processing...', 'info');
-            
+
             // Start polling
             if (state.pollTimer) {
                 clearInterval(state.pollTimer);
             }
-            
+
             // Initial status display
             elements.latestResult.classList.remove('hidden');
             elements.resultStatus.className = 'status-badge status-pending';
@@ -677,21 +678,21 @@ function setupEventListeners() {
                     <p>Starting extraction...</p>
                 </div>
             `;
-            
+
             state.pollTimer = setInterval(() => pollTaskStatus(state.currentTaskId), CONFIG.POLL_INTERVAL);
-            
+
         } catch (error) {
             showToast(error.message, 'error');
         } finally {
             hideLoading();
         }
     });
-    
+
     // Prompt character count
     elements.scrapePrompt.addEventListener('input', () => {
         elements.promptLength.textContent = elements.scrapePrompt.value.length;
     });
-    
+
     // Example prompts
     elements.exampleBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -699,40 +700,40 @@ function setupEventListeners() {
             elements.promptLength.textContent = btn.dataset.prompt.length;
         });
     });
-    
+
     // Refresh tasks
     elements.refreshTasks.addEventListener('click', () => {
         loadUserActivity();
         showToast('Tasks refreshed', 'info');
     });
-    
+
     // Schedule form toggle
     elements.showScheduleForm.addEventListener('click', () => {
         elements.scheduleForm.classList.toggle('hidden');
     });
-    
+
     elements.cancelSchedule.addEventListener('click', () => {
         elements.scheduleForm.classList.add('hidden');
         elements.scheduleForm.reset();
     });
-    
+
     // Schedule form submit
     elements.scheduleForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         showLoading();
-        
+
         const url = elements.scheduleUrl.value;
         const cron = elements.scheduleCron.value;
         const prompt = elements.schedulePrompt.value;
-        
+
         try {
             const job = await api.createScheduledJob(url, prompt, cron);
             state.scheduledJobs.push(job);
             renderScheduledJobs();
-            
+
             elements.scheduleForm.classList.add('hidden');
             elements.scheduleForm.reset();
-            
+
             showToast('Scheduled job created!', 'success');
         } catch (error) {
             showToast(error.message, 'error');
@@ -740,7 +741,7 @@ function setupEventListeners() {
             hideLoading();
         }
     });
-    
+
     // Cron helper buttons
     elements.cronBtns.forEach(btn => {
         btn.addEventListener('click', () => {
