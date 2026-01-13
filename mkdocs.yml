@@ -1,0 +1,91 @@
+site_name: Intelligent Web Data Aggregator
+site_description: Documentation for the Intelligent Web Data Aggregator diploma project
+site_author: Yan Marchan
+site_url: https://marchanyanehu.github.io/diploma_v1/
+
+repo_name: marchanyanehu/diploma_v1
+repo_url: https://github.com/marchanyanehu/diploma_v1
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Project Overview:
+      - Overview: 01-project-overview/index.md
+      - Problem & Goals: 01-project-overview/problem-and-goals.md
+      - Stakeholders: 01-project-overview/stakeholders.md
+      - Scope: 01-project-overview/scope.md
+      - Features: 01-project-overview/features.md
+  - Technical:
+      - Architecture: 02-technical/index.md
+      - Tech Stack: 02-technical/tech-stack.md
+      - Deployment: 02-technical/deployment.md
+      - Evaluation Criteria:
+          - Backend: 02-technical/criteria/01-backend.md
+          - AI Assistant: 02-technical/criteria/02-ai-assistant.md
+          - Database: 02-technical/criteria/03-database.md
+          - Microservices: 02-technical/criteria/04-microservices.md
+          - Testing: 02-technical/criteria/05-testing.md
+          - Containerization: 02-technical/criteria/06-containerization.md
+          - API Documentation: 02-technical/criteria/07-api-docs.md
+  - User Guide:
+      - Getting Started: 03-user-guide/index.md
+      - Features: 03-user-guide/features.md
+      - FAQ: 03-user-guide/faq.md
+  - Retrospective: 04-retrospective/index.md
+  - Appendices:
+      - Glossary: appendices/glossary.md
+      - API Reference: appendices/api-reference.md
+      - Database Schema: appendices/db-schema.md
+      - Example Dialogs: appendices/example-dialogs.md
+      - System Limitations: appendices/system-limitations.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/marchanyanehu/diploma_v1

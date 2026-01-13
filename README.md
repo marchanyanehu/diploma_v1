@@ -1,6 +1,10 @@
 # Intelligent Web Data Aggregator
 
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://marchanyanehu.github.io/diploma_v1/)
+
 A microservice-based web scraping system powered by LLMs to intelligently extract structured data from websites using natural language queries.
+
+> 📚 **[View Full Documentation](https://marchanyanehu.github.io/diploma_v1/)**
 
 ## Target Audience & Use Cases
 
