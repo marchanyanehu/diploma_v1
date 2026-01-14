@@ -11,12 +11,12 @@
 | **ORM** | SQLAlchemy | 1.4+ | Robust for complex schemas and relations (tasks, caching, users). |
 | **Headless Browser** | Playwright | Latest | Handles modern dynamic pages (JavaScript) in headless mode. |
 | **LLM APIs** | Baseten (DeepSeek), Gemini | Gemini-3.0-Flash (default fallback) | Provides intelligence without local model training. Baseten is primary; Gemini is used for fallback and large context (up to 1M tokens). |
-| **Containerization** | Docker, Docker Compose | (n/a) | Ensures consistent environments; defines multi-container setup (API, DB, Workers). |
-| **CI/CD** | GitHub Actions (implied) | \-  | Automates testing, linting, and deployment pipelines. |
+| **Frontend** | HTML/JS (Vanilla) | ES6+ | Lightweight MVP interface served by Nginx. |
+| **Infrastructure** | GCP Compute Engine | e2-medium | Cost-effective cloud hosting for demonstration. |
+| **Orchestration** | Docker Compose | V2 | Simple multi-container management. |
+| **CI/CD** | Manual (SSH) | - | Automatic pipelines disabled for manual control. |
 | **Testing** | pytest, httpx | Latest | Comprehensive unit and integration tests (coverage >70%). |
 | **Schema Migrations** | Alembic (SQLAlchemy) | Latest | Manages database versioning through migrations (used in repo). |
-
-## Key Technology Decisions
 
 ### Decision 1: Python & FastAPI
 

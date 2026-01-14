@@ -182,6 +182,7 @@ erDiagram
 ```mermaid
 graph LR
   subgraph Network
+    Frontend[diploma_frontend :80]
     API[diploma_api :8000]
     HW[diploma_headless_worker]
     AI[diploma_ai_worker]
@@ -190,7 +191,8 @@ graph LR
     PG[(PostgreSQL 15)]
   end
 
-  Client -->|HTTP| API
+  Client -->|HTTP| Frontend
+  Frontend -->|Proxy| API
   API -->|Celery tasks\nai_queue| AI
   AI -->|Celery tasks\nfetching_queue| HW
   SCHED -->|Celery beat\nai_queue| AI
@@ -208,6 +210,8 @@ graph LR
 
 ## Operational Features
 
+- **Deployment**: Manual GCP deployment via Docker Compose (CI/CD disabled).
+- **Frontend**: Nginx-based SPA served on port 80.
 - **Health checks**: API exposes `/health` and `/api/v1/health`; workers and scheduler include container health checks that ping Redis (and Postgres when configured).
 - **Correlation IDs**: Incoming requests accept/emit `X-Correlation-Id`; the ID is propagated through Celery headers so logs across API, workers, and scheduler can be stitched.
 - **Images per service**: Dedicated Dockerfiles for API, AI worker, headless worker, and scheduler with non-root users and slim bases.

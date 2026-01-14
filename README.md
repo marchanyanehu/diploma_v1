@@ -94,60 +94,18 @@ Microservice layout with shared infrastructure (see `docs_old/ARCHITECTURE.md` f
 -   **Input Sanitization**: Dangerous prompt patterns are blocked (instruction override, jailbreak attempts)
 -   **JWT Authentication**: All protected endpoints require valid Bearer tokens
 
-## Setup & Installation
+## Deployment
 
-1.  **Prerequisites**: Docker and Docker Compose.
-2.  **Environment Variables**:
-    -   Copy `.env.example` to `.env`.
-    -   Set your LLM keys (`BASETEN_API_KEY` for DeepSeek via Baseten; fallback `GOOGLE_API_KEY`/`GEMINI_API_KEY` for Gemini; optional `OPENAI_API_KEY`).
-    -   Choose provider/model via `LLM_PROVIDER`/`LLM_MODEL` (default: baseten / baseten/deepseek-ai/DeepSeek-V3.2). Optional fallback via `LLM_FALLBACK_PROVIDER`/`LLM_FALLBACK_MODEL` (default: gemini / gemini-3.0-flash). Includes automatic large-context fallback for pages up to 1M tokens.
-    -   Set `SECRET_KEY` for JWT auth.
-    -   Use least-privilege DB creds: `DB_USER=app_write`, `DB_PASSWORD=<strong>`, keep `POSTGRES_USER` only for admin/bootstrap.
-3.  **Run**:
-    ```bash
-    docker-compose up --build
-    ```
+**Live Demo**: [http://34.76.213.63/](http://34.76.213.63/)
 
-## Database Setup (roles, migrations, seeds)
+The system is deployed on Google Cloud Platform (Compute Engine) using Docker Compose.
+- **Frontend**: Served via Nginx on port 80.
+- **API**: Proxied via Nginx.
+- **SSL**: Pending configuration (currently HTTP).
 
-- **Roles (once per environment, run as postgres):**
-  ```bash
-  psql -h <host> -p 5432 -U postgres -d diploma_db \
-    -v app_read_pwd='<strong>' \
-    -v app_write_pwd='<strong>' \
-    -v app_admin_pwd='<strong>' \
-    -f scripts/db_roles.sql
-  ```
-- **Migrations:** `alembic upgrade head` (or let the API start with the database available and alembic invoked separately).
-- **Seeds (idempotent, run as app_admin):**
-  ```bash
-  psql -h <host> -p 5432 -U app_admin -d diploma_db -f scripts/db_seed.sql
-  # demo credentials: demo_user / Password123!
-  ```
-- **Schema/roles reference:** see `reference_docs/DB/data_dictionary.md`.
+See [GCP Deployment Guide](docs/GCP_DEPLOYMENT.md) for detailed manual deployment instructions.
 
-## Services & API
-
-Once running, visit: `http://localhost:8000/docs`.
-
-### Auth
--   Register: `POST /auth/register`
--   Login: `POST /auth/token` -> returns `access_token`
--   Use `Authorization: Bearer <token>` for all `/api/v1/*` routes
-
-### Authentication
--   Required for tasks and schedules.
-
-### Core Endpoints
--   **Create Task**: `POST /api/v1/process`
--   **Check Status**: `GET /api/v1/status/{task_id}`
--   **Get Result**: `GET /api/v1/result/{task_id}`
-
-### Scheduling
--   **Create Job**: `POST /api/v1/jobs`
--   **List Jobs**: `GET /api/v1/jobs`
--   **Delete Job**: `DELETE /api/v1/jobs/{job_id}`
--   Jobs enqueue tasks via Celery Beat every minute.
+## Containerization (minimum compliance)
 
 ### Workers & Queues
 -   **Headless Worker** (`fetching_queue`): Playwright fetch with semantic content extraction → sends `scrape.process_content`
