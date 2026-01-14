@@ -10,7 +10,18 @@ This section provides instructions for end users on how to use the application.
 
 ## Getting Started
 
-This project does not include a web UI. Users interact with the system via its REST API.
+You can interact with the system via the **Frontend Web Interface** or directly via the **REST API**.
+
+**Live Demo**: [http://marchie.space/](http://marchie.space/)
+
+### Web Interface (Recommended)
+
+1.  Navigate to the deployed URL (or `http://localhost:80` for local).
+2.  Register/Login.
+3.  Use the "New Task" form to submit requests.
+4.  View results in the Dashboard.
+
+### API Access
 
 ### Installation & Setup
 

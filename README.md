@@ -96,7 +96,7 @@ Microservice layout with shared infrastructure (see `docs_old/ARCHITECTURE.md` f
 
 ## Deployment
 
-**Live Demo**: [http://34.76.213.63/](http://34.76.213.63/)
+**Live Demo**: [http://marchie.space/](http://marchie.space/)
 
 The system is deployed on Google Cloud Platform (Compute Engine) using Docker Compose.
 - **Frontend**: Served via Nginx on port 80.

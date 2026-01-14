@@ -24,6 +24,7 @@ This guide explains how to interact with the Intelligent Web Data Aggregator to 
 
 ### Base URL
 
+- **Live Demo (GCP)**: `http://marchie.space`
 - **Local Development**: `http://localhost:8000`
 - **API Documentation**: `http://localhost:8000/docs` (Swagger UI)
 

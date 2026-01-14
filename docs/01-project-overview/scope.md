@@ -9,6 +9,7 @@
 | **Headless Browser Worker** | Playwright-based worker for fetching dynamic content (JS support). | Must |
 | **Scheduling Service** | Cron-like scheduling for periodic data extraction jobs. | Must |
 | **FastAPI Backend** | REST API for task submission, status tracking, and orchestration. | Must |
+| **Frontend MVP** | Basic web interface (SPA) for task submission and monitoring. | Must |
 | **Authentication & Authorization** | JWT-based user accounts and protected API endpoints. | Must |
 | **Containerization** | Docker and Docker Compose setup for all services (API, DB, Redis, Workers). | Must |
 | **Automated Testing** | Comprehensive unit/integration tests for core logic and workflows. | Must |
@@ -21,7 +22,7 @@
 | **Large-Scale Web Crawling** | Focus is on specific, user-defined pages, not recursive broad crawling. | Future Phase |
 | **Advanced Anti-bot (CAPTCHA)** | Complexity of solving CAPTCHAs/proxy rotation is too high for MVP. | Future Phase |
 | **Custom LLM Training** | Using pre-trained APIs (Baseten/Gemini) is sufficient and strictly defined. | Never (Cost/Time) |
-| **Full Web User Interface** | Focus is on Backend API; minimal/admin UI only if time permits. | TBD |
+
 | **Rich Report Generation** | PDF/Dashboard exports are secondary to raw data access (JSON/CSV). | Future Phase |
 | **Third-Party Scraping APIs** | Dependency on external paid scraping services is avoided for learning purposes. | Never |
 

@@ -45,7 +45,7 @@ AIWorker -->|"(calls LLM API)"| Internet
 | Environment | URL / Access | Branch | Deployment Method |
 | --- | --- | --- | --- |
 | **Development (Local)** | <http://localhost:8000> (API) | `main` or feature branches | `docker compose up` |
-| **Production** | <http://34.76.213.63/> | `master` | Manual via SSH |
+| **Production** | <http://marchie.space/> | `master` | Manual via SSH |
 
 ## CI/CD Pipeline
 
