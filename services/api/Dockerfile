@@ -46,20 +46,23 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
 
 # Copy application code
+# Copy application code
 COPY . .
 
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
+# Set up entrypoint
+COPY services/api/entrypoint.sh /app/entrypoint.sh
+USER root
+RUN chmod +x /app/entrypoint.sh
 USER appuser
 
-# Expose port
-EXPOSE 8000
+# Change ownership to non-root user
+USER root
+RUN chown -R appuser:appuser /app
+USER appuser
 
 # Health check (uses curl to avoid extra Python deps)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Command to run the application
-CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Command runs migrations then starts app
+CMD ["/app/entrypoint.sh"]
