@@ -120,7 +120,7 @@ class LLMClientConfig:
     large_context_threshold: int = LARGE_CONTEXT_TOKEN_THRESHOLD
     timeout_s: int = 30
     max_retries: int = 2
-    temperature: float = 0.2
+    temperature: float = 1
     max_tokens: Optional[int] = None
     log_payloads: bool = False
     breaker_fail_threshold: int = 3
@@ -219,7 +219,7 @@ class LLMClient:
 
         timeout_s = int(os.getenv("LLM_REQUEST_TIMEOUT_S", "30"))
         max_retries = int(os.getenv("LLM_MAX_RETRIES", "2"))
-        temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+        temperature = float(os.getenv("LLM_TEMPERATURE", "1"))
         max_tokens_env = os.getenv("LLM_MAX_TOKENS")
         max_tokens_raw = int(max_tokens_env) if max_tokens_env else None
         max_tokens = _clamp_max_tokens(provider, fallback_provider, max_tokens_raw)
