@@ -10,7 +10,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+      - ./init_db.sql:/docker-entrypoint-initdb.d/01_init_db.sql:ro
+      - ./scripts/02_db_roles.sql:/docker-entrypoint-initdb.d/02_db_roles.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-diploma_db}"]
       interval: 10s
