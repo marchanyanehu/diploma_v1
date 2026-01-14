@@ -39,6 +39,8 @@ Short description: "This thesis project focuses on the development of an intelli
 | 5   | Automated tests ≥ 70% coverage | Тестирование бизнес-логики и API с покрытием не менее 70% с использованием Pytest. |
 | 6   | Containerization | Каждый сервис обёрнут в Docker-контейнер, используется Docker Compose для оркестрации. |
 | 7   | API documentation | Автоматическая генерация документации через OpenAPI/Swagger на базе FastAPI. |
+| 8   | Frontend (MVP) | Базовый веб-интерфейс (HTML/CSS/JS) для взаимодействия с пользователем. |
+| 9   | Deployment | Развертывание приложения на удаленном сервере (Google Cloud Platform). |
 
 Руководитель дипломного проекта - Третьяк Евгений
 

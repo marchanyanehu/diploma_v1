@@ -148,43 +148,8 @@ gcloud compute instances describe diploma-backend --zone=europe-west1-b --format
 
 ---
 
-## Step 5: Setup GitHub Actions (Optional)
 
-For automatic deployment on push:
-
-### 5.1 Create a Service Account
-
-```bash
-# Create service account
-gcloud iam service-accounts create github-actions \
-  --display-name="GitHub Actions"
-
-# Grant permissions
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/compute.instanceAdmin.v1"
-
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/iap.tunnelResourceAccessor"
-
-# Create key
-gcloud iam service-accounts keys create gcp-key.json \
-  --iam-account=github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com
-```
-
-### 5.2 Add GitHub Secrets
-
-In your GitHub repo → Settings → Secrets → Actions:
-
-| Secret | Value |
-|--------|-------|
-| `GCP_PROJECT_ID` | Your project ID |
-| `GCP_SA_KEY` | Contents of `gcp-key.json` |
-
----
-
-## Step 6: Setup HTTPS (Optional but Recommended)
+## Step 5: Setup HTTPS (Optional but Recommended)
 
 ### Option A: Use Cloudflare (Free)
 
