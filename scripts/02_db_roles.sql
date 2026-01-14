@@ -29,7 +29,8 @@ BEGIN
 END $$;
 
 GRANT CONNECT ON DATABASE diploma_db TO app_read, app_write, app_admin;
-GRANT USAGE ON SCHEMA public TO app_read, app_write, app_admin;
+GRANT USAGE, CREATE ON SCHEMA public TO app_write, app_admin;
+GRANT USAGE ON SCHEMA public TO app_read;
 
 -- Read-only
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_read;
