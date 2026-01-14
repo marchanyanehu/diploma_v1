@@ -3,10 +3,9 @@ name: Deploy to Google Cloud
 on:
   push:
     branches:
-      - main
+      - master
     paths-ignore:
       - 'docs/**'
-      - 'frontend/**'
       - '*.md'
   workflow_dispatch:
 
@@ -33,9 +32,8 @@ jobs:
 
       - name: Deploy to Compute Engine
         run: |
-          gcloud compute ssh $GCE_INSTANCE --zone=$GCE_ZONE --command="
+          gcloud compute ssh dada_marchan@$GCE_INSTANCE --zone=$GCE_ZONE --tunnel-through-iap --command="
             cd ~/diploma && 
-            git pull origin main &&
-            docker-compose down &&
-            docker-compose up -d --build
+            git pull origin master &&
+            sudo docker compose up -d --build --remove-orphans
           "
