@@ -1,0 +1,41 @@
+name: Deploy to Google Cloud
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'frontend/**'
+      - '*.md'
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCE_INSTANCE: diploma-backend
+  GCE_ZONE: europe-west1-b
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Compute Engine
+        run: |
+          gcloud compute ssh $GCE_INSTANCE --zone=$GCE_ZONE --command="
+            cd ~/diploma && 
+            git pull origin main &&
+            docker-compose down &&
+            docker-compose up -d --build
+          "

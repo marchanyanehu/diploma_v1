@@ -5,6 +5,9 @@ COPY index.html /usr/share/nginx/html/
 COPY styles.css /usr/share/nginx/html/
 COPY app.js /usr/share/nginx/html/
 
+# Create config.js for production (empty = same origin, API proxied by nginx)
+RUN echo "window.API_BASE_URL = '';" > /usr/share/nginx/html/config.js
+
 # Custom nginx config for SPA routing
 RUN echo 'server { \
     listen 80; \

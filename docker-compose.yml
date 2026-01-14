@@ -177,15 +177,24 @@ services:
       retries: 3
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: nginx:alpine
     container_name: diploma_frontend
     ports:
-      - "3000:80"
+      - "80:80"
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./frontend/app.js:/usr/share/nginx/html/app.js:ro
+      - ./frontend/config.js:/usr/share/nginx/html/config.js:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - api
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
 volumes:
   postgres_data:
