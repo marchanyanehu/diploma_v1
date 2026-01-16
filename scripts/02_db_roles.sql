@@ -11,20 +11,26 @@ DECLARE
     admin_pwd TEXT := current_setting('app.admin_pwd', true);
 BEGIN
     -- Use defaults if env vars not set
-    IF read_pwd IS NULL OR read_pwd = '' THEN read_pwd := 'change-me-strong-app-read'; END IF;
-    IF write_pwd IS NULL OR write_pwd = '' THEN write_pwd := 'change-me-strong-app-write'; END IF;
-    IF admin_pwd IS NULL OR admin_pwd = '' THEN admin_pwd := 'change-me-strong-app-admin'; END IF;
+    IF read_pwd IS NULL OR read_pwd = '' THEN read_pwd := 'app_write_pwd'; END IF;
+    IF write_pwd IS NULL OR write_pwd = '' THEN write_pwd := 'app_write_pwd'; END IF;
+    IF admin_pwd IS NULL OR admin_pwd = '' THEN admin_pwd := 'app_write_pwd'; END IF;
 
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_read') THEN
         EXECUTE format('CREATE ROLE app_read LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', read_pwd);
+    ELSE
+        EXECUTE format('ALTER ROLE app_read WITH PASSWORD %L', read_pwd);
     END IF;
 
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_write') THEN
         EXECUTE format('CREATE ROLE app_write LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', write_pwd);
+    ELSE
+        EXECUTE format('ALTER ROLE app_write WITH PASSWORD %L', write_pwd);
     END IF;
 
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_admin') THEN
         EXECUTE format('CREATE ROLE app_admin LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', admin_pwd);
+    ELSE
+        EXECUTE format('ALTER ROLE app_admin WITH PASSWORD %L', admin_pwd);
     END IF;
 END $$;
 

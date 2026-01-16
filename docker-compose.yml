@@ -4,12 +4,12 @@ services:
     container_name: diploma_postgres
     command: >
       postgres
-      -c "app.read_pwd=${DB_PASSWORD:-postgres123}"
-      -c "app.write_pwd=${DB_PASSWORD:-postgres123}"
-      -c "app.admin_pwd=${DB_PASSWORD:-postgres123}"
+      -c "app.read_pwd=${DB_PASSWORD:-app_write_pwd}"
+      -c "app.write_pwd=${DB_PASSWORD:-app_write_pwd}"
+      -c "app.admin_pwd=${DB_PASSWORD:-app_write_pwd}"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-diploma_db}
     ports:
       - "5432:5432"
@@ -38,6 +38,27 @@ services:
       retries: 5
     restart: unless-stopped
 
+  db-init:
+    image: postgres:15-alpine
+    container_name: diploma_db_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_HOST: postgres
+      DB_NAME: ${POSTGRES_DB:-diploma_db}
+      DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
+    volumes:
+      - ./scripts/sync_db_roles.sh:/sync_db_roles.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chmod +x /sync_db_roles.sh
+        /sync_db_roles.sh
+    restart: "no"
+
   api:
     build:
       context: .
@@ -52,7 +73,7 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-diploma_db}
       DB_USER: ${DB_USER:-app_write}
-      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
+      DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
@@ -66,6 +87,8 @@ services:
       BASETEN_API_KEY: ${BASETEN_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -88,7 +111,7 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-diploma_db}
       DB_USER: ${DB_USER:-app_write}
-      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
+      DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
       PLAYWRIGHT_NAV_TIMEOUT_MS: ${PLAYWRIGHT_NAV_TIMEOUT_MS:-30000}
       PLAYWRIGHT_SETTLE_DELAY_MS: ${PLAYWRIGHT_SETTLE_DELAY_MS:-500}
@@ -97,6 +120,8 @@ services:
       PLAYWRIGHT_LOCALE: ${PLAYWRIGHT_LOCALE:-en-US}
       PLAYWRIGHT_TZ: ${PLAYWRIGHT_TZ:-UTC}
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -126,7 +151,7 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-diploma_db}
       DB_USER: ${DB_USER:-app_write}
-      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
+      DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
       LLM_PROVIDER: ${LLM_PROVIDER:-baseten}
       LLM_MODEL: ${LLM_MODEL:-baseten/deepseek-ai/DeepSeek-V3.2}
       LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-gemini}
@@ -141,6 +166,8 @@ services:
       - ./services/scheduler:/app/services/scheduler:ro
       - ./shared:/app/shared:ro
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -169,8 +196,10 @@ services:
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-diploma_db}
       DB_USER: ${DB_USER:-app_write}
-      DB_PASSWORD: ${DB_PASSWORD:-change-me-strong-app-write}
+      DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
     depends_on:
+      db-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
