@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-domains=(marchie.space www.marchie.space)
+domains=(marchie.space)
 rsa_key_size=4096
 data_path="./certbot"
 email="dadada.marchan@gmail.com" # Adding a valid email is recommended
