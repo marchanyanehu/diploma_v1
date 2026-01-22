@@ -52,11 +52,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-app_write_pwd}
     volumes:
       - ./scripts/sync_db_roles.sh:/sync_db_roles.sh:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        chmod +x /sync_db_roles.sh
-        /sync_db_roles.sh
+    entrypoint: ["/bin/sh", "/sync_db_roles.sh"]
     restart: "no"
 
   api:
