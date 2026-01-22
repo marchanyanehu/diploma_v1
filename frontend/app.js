@@ -6,7 +6,7 @@
 // Configuration
 // API_BASE_URL can be overridden by setting window.API_BASE_URL before this script loads
 const CONFIG = {
-    API_BASE_URL: window.API_BASE_URL || 'http://localhost:8000',
+    API_BASE_URL: window.API_BASE_URL !== undefined ? window.API_BASE_URL : 'http://localhost:8000',
     POLL_INTERVAL: 2000, // ms
     TOKEN_KEY: 'auth_token',
     USERNAME_KEY: 'username'
