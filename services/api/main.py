@@ -273,6 +273,9 @@ def register(
     user_repo: UserRepository = Depends(get_user_repo),
     auth_service: auth.AuthService = Depends(auth.get_auth_service),
 ):
+    if not settings.enable_registration:
+        raise HTTPException(status_code=403, detail="Registration is currently disabled")
+
     db_user = user_repo.get_by_username(username=user.username)
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")

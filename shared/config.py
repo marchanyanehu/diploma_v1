@@ -91,6 +91,9 @@ class Settings(BaseForSettings):  # type: ignore[misc]
     
     # CORS
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
+
+    # Feature Flags
+    enable_registration: bool = Field(default=False, alias="ENABLE_REGISTRATION")
     
     @staticmethod
     def _resolve_with_env(value: str, env_key: str) -> str:
